@@ -37,6 +37,7 @@ pub use crate::net::DataUriNetProvider;
     )
 ))]
 use blitz_traits::shell::FileDialogFilter;
+use blitz_traits::shell::NativeSelectMenuRequest;
 use blitz_traits::shell::ShellProvider;
 use std::sync::Arc;
 use winit::cursor::{Cursor, CursorIcon};
@@ -44,6 +45,8 @@ use winit::dpi::{LogicalPosition, LogicalSize};
 pub use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};
 pub use winit::window::Window;
 use winit::window::{ImeCapabilities, ImeEnableRequest, ImeRequest, ImeRequestData};
+
+use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
 
 #[derive(Default)]
 pub struct Config {
@@ -119,6 +122,74 @@ impl ShellProvider for BlitzShellProvider {
                 LogicalSize::new(width, height).into(),
             ),
         ));
+    }
+
+    fn open_native_select_menu(&self, req: NativeSelectMenuRequest) -> Option<usize> {
+        #[cfg(target_os = "macos")]
+        {
+            use muda::{CheckMenuItem, ContextMenu as _, MenuEvent, MenuId, Submenu};
+
+            let window_handle = self.window.window_handle().ok()?;
+            let ns_view = match window_handle.as_raw() {
+                RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr(),
+                _ => return None,
+            };
+
+            let prefix = format!("blitz-select:{}:", req.select_id);
+            let submenu = Submenu::new("", true);
+
+            // Build items.
+            if req.items.is_empty() {
+                return None;
+            }
+
+            let mut menu_items = Vec::with_capacity(req.items.len());
+            for (index, item) in req.items.into_iter().enumerate() {
+                let label = if item.label.contains('&') {
+                    item.label.replace('&', "&&")
+                } else {
+                    item.label
+                };
+                let id = MenuId::new(format!("{prefix}{index}"));
+                let menu_item = CheckMenuItem::with_id(
+                    id,
+                    label,
+                    !item.disabled,
+                    req.selected_index == Some(index),
+                    None,
+                );
+                let _ = submenu.append(&menu_item);
+                menu_items.push(menu_item);
+            }
+
+            let position = req
+                .position
+                .map(|(x, y)| muda::dpi::LogicalPosition::new(x as f64, y as f64).into());
+
+            // Best-effort: avoid selecting from a stale previous menu event.
+            while MenuEvent::receiver().try_recv().is_ok() {}
+
+            unsafe {
+                let _ = submenu.show_context_menu_for_nsview(ns_view, position);
+            }
+
+            while let Ok(event) = MenuEvent::receiver().try_recv() {
+                let id = event.id.as_ref();
+                if let Some(rest) = id.strip_prefix(&prefix)
+                    && let Ok(index) = rest.parse::<usize>()
+                {
+                    return Some(index);
+                }
+            }
+
+            None
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = req;
+            None
+        }
     }
 
     #[cfg(all(

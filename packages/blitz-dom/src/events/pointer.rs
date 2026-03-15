@@ -9,6 +9,7 @@ use blitz_traits::{
         DomEvent, DomEventData, MouseEventButton, MouseEventButtons,
     },
     navigation::NavigationOptions,
+    shell::{NativeSelectMenuItem, NativeSelectMenuRequest},
 };
 use keyboard_types::Modifiers;
 use markup5ever::local_name;
@@ -495,6 +496,40 @@ pub(crate) fn handle_click(
                     .map(|select| (select.mode, select.open))
                     .unwrap_or((crate::node::SelectMode::Dropdown, false));
                 let is_multiple = el.attr(local_name!("multiple")).is_some();
+                let mut native_menu: Option<(NativeSelectMenuRequest, Vec<bool>)> = None;
+                if matches!(mode.0, crate::node::SelectMode::Dropdown) && !mode.1 {
+                    if let Some(select) = el.select_data() {
+                        // Prefer anchoring to the control itself (works for label->select synthetic clicks).
+                        let viewport_scroll = doc.viewport_scroll();
+                        let pos = doc.nodes[node_id].absolute_position(0.0, 0.0);
+                        let zoom = doc.viewport().zoom();
+                        let anchor_x = (pos.x - viewport_scroll.x as f32) * zoom;
+                        let anchor_y = (pos.y - viewport_scroll.y as f32
+                            + doc.nodes[node_id].final_layout.size.height)
+                            * zoom;
+
+                        let selected_index =
+                            doc.selected_option_indices(node_id).into_iter().next();
+                        let items = select
+                            .options
+                            .iter()
+                            .map(|option| NativeSelectMenuItem {
+                                label: option.label.clone(),
+                                disabled: option.disabled,
+                            })
+                            .collect::<Vec<_>>();
+                        let disabled = items.iter().map(|item| item.disabled).collect::<Vec<_>>();
+                        native_menu = Some((
+                            NativeSelectMenuRequest {
+                                select_id: node_id,
+                                items,
+                                selected_index,
+                                position: Some((anchor_x, anchor_y)),
+                            },
+                            disabled,
+                        ));
+                    }
+                }
 
                 if let Some(hit) = hit {
                     let _ = doc.set_select_active_from_local_y(node_id, hit.y);
@@ -520,7 +555,25 @@ pub(crate) fn handle_click(
                             }
                             let _ = doc.close_open_select();
                         } else {
-                            let _ = doc.open_select(node_id);
+                            let mut opened_native = false;
+                            if let Some((req, disabled)) = native_menu.take() {
+                                if let Some(index) = doc.shell_provider.open_native_select_menu(req)
+                                {
+                                    if disabled.get(index).is_some_and(|is_disabled| !*is_disabled)
+                                    {
+                                        let _ = doc.set_select_indices(
+                                            node_id,
+                                            &[index],
+                                            &mut *dispatch_event,
+                                        );
+                                        opened_native = true;
+                                    }
+                                }
+                            }
+
+                            if !opened_native {
+                                let _ = doc.open_select(node_id);
+                            }
                         }
                     }
                     crate::node::SelectMode::Listbox => {

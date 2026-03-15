@@ -6,6 +6,24 @@ use cursor_icon::CursorIcon;
 // TODO: fill out with meaningful errors
 pub struct ClipboardError;
 
+#[derive(Debug, Clone)]
+pub struct NativeSelectMenuItem {
+    pub label: String,
+    pub disabled: bool,
+}
+
+/// Request to show a platform-native popup menu for an HTML `<select>`.
+///
+/// Coordinates are in logical window coordinates (physical pixels divided by the platform scale
+/// factor). These do not include document zoom.
+#[derive(Debug, Clone)]
+pub struct NativeSelectMenuRequest {
+    pub select_id: usize,
+    pub items: Vec<NativeSelectMenuItem>,
+    pub selected_index: Option<usize>,
+    pub position: Option<(f32, f32)>,
+}
+
 /// Abstraction over windowing / operating system ("shell") functionality that allows a Blitz document
 /// to access that functionality without depending on a specific shell environment.
 pub trait ShellProvider: Send + Sync + 'static {
@@ -40,6 +58,13 @@ pub trait ShellProvider: Send + Sync + 'static {
         let _ = multiple;
         let _ = filter;
         vec![]
+    }
+
+    /// Attempt to open a platform-native select menu. Returns the selected item index, or `None`
+    /// if unsupported or dismissed.
+    fn open_native_select_menu(&self, req: NativeSelectMenuRequest) -> Option<usize> {
+        let _ = req;
+        None
     }
 }
 
