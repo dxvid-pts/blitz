@@ -81,13 +81,12 @@ impl ElementCx<'_> {
                         self.context.dom,
                         option,
                         self.transform,
-                        option_label_x(
+                        closed_option_label_x(
                             self.node,
                             option,
                             content_x,
                             content_width,
                             self.scale,
-                            true,
                         ),
                         content_y
                             + ((content_height - option_text_height(option, self.scale)) / 2.0)
@@ -136,14 +135,7 @@ impl ElementCx<'_> {
                         self.context.dom,
                         option,
                         self.transform,
-                        option_label_x(
-                            self.node,
-                            option,
-                            content_x,
-                            content_width,
-                            self.scale,
-                            false,
-                        ),
+                        option_row_label_x(option, content_x, self.scale),
                         row_top
                             + ((row_height - option_text_height(option, self.scale)) / 2.0)
                                 .max(0.0),
@@ -227,14 +219,7 @@ impl BlitzDomPainter<'_> {
                 self.dom,
                 option,
                 transform,
-                option_label_x(
-                    node,
-                    option,
-                    0.0,
-                    width as f64 * self.scale,
-                    self.scale,
-                    false,
-                ),
+                option_row_label_x(option, 0.0, self.scale),
                 row_top + ((row_height - option_text_height(option, self.scale)) / 2.0).max(0.0),
             );
         }
@@ -333,26 +318,25 @@ fn option_text_bounds(option: &blitz_dom::node::SelectOption, scale: f64) -> (f6
     }
 }
 
-fn option_label_x(
+fn closed_option_label_x(
     node: &Node,
     option: &blitz_dom::node::SelectOption,
     content_x: f64,
     content_width: f64,
     scale: f64,
-    reserve_chevron: bool,
 ) -> f64 {
     let left_padding = SELECT_TEXT_PADDING * scale;
-    let right_padding = left_padding
-        + if reserve_chevron {
-            SELECT_CHEVRON_RESERVED_WIDTH * scale
-        } else {
-            0.0
-        };
+    let right_padding = left_padding + SELECT_CHEVRON_RESERVED_WIDTH * scale;
     let available_width = (content_width - left_padding - right_padding).max(0.0);
     let (text_origin_x, text_width) = option_text_bounds(option, scale);
     let text_width = text_width.min(available_width);
+    let text_align = if text_width < available_width {
+        select_text_align(node)
+    } else {
+        TextAlignKeyword::Start
+    };
 
-    match select_text_align(node) {
+    match text_align {
         TextAlignKeyword::Center | TextAlignKeyword::MozCenter => {
             content_x + left_padding + ((available_width - text_width) / 2.0).max(0.0)
                 - text_origin_x
@@ -364,10 +348,15 @@ fn option_label_x(
     }
 }
 
+fn option_row_label_x(option: &blitz_dom::node::SelectOption, content_x: f64, scale: f64) -> f64 {
+    let (text_origin_x, _) = option_text_bounds(option, scale);
+    content_x + SELECT_TEXT_PADDING * scale - text_origin_x
+}
+
 fn option_fill_color(
     _dom: &BaseDocument,
     node: &Node,
-    focused: bool,
+    _focused: bool,
     selected: bool,
     active: bool,
 ) -> Option<Color> {
@@ -376,11 +365,10 @@ fn option_fill_color(
     }
 
     let [r, g, b, _] = resolved_select_foreground_color(node).components;
-    let alpha = match (focused, selected, active) {
-        (_, _, true) => 0.4,
-        (true, true, false) => 0.32,
-        (_, true, false) => 0.24,
-        _ => 0.0,
+    let alpha = match (selected, active) {
+        (true, _) => 0.3,
+        (false, true) => 0.15,
+        (false, false) => 0.0,
     };
 
     Some(Color::new([r, g, b, alpha]))
