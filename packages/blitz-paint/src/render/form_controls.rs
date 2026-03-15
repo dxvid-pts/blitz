@@ -58,10 +58,12 @@ impl ElementCx<'_> {
             return;
         };
 
-        let content_x = self.node.final_layout.content_box_x() as f64 * self.scale;
-        let content_y = self.node.final_layout.content_box_y() as f64 * self.scale;
-        let content_width = self.node.final_layout.content_box_width() as f64 * self.scale;
-        let content_height = self.node.final_layout.content_box_height() as f64 * self.scale;
+        // `taffy::Layout::content_box_x/y` include `layout.location`, which is already applied by
+        // `self.transform` (border-box translation). Use the local content-box rect instead.
+        let content_x = self.frame.content_box.x0;
+        let content_y = self.frame.content_box.y0;
+        let content_width = self.frame.content_box.width();
+        let content_height = self.frame.content_box.height();
         let row_height = select.row_height as f64 * self.scale;
         let chevron_inset = 14.0 * self.scale;
         let chevron_color = resolved_select_foreground_color(self.node);
@@ -76,21 +78,41 @@ impl ElementCx<'_> {
                         .and_then(|element| element.option_data())
                         .is_some_and(|data| data.selected)
                 }) {
-                    draw_option_label(
-                        scene,
-                        self.context.dom,
+                    let left_padding = SELECT_TEXT_PADDING * self.scale;
+                    let right_padding = left_padding + SELECT_CHEVRON_RESERVED_WIDTH * self.scale;
+                    let label_clip = Rect::new(
+                        content_x + left_padding,
+                        content_y,
+                        (content_x + content_width - right_padding).max(content_x + left_padding),
+                        content_y + content_height,
+                    );
+                    let label_x = closed_option_label_x(
+                        self.node,
                         option,
+                        content_x,
+                        content_width,
+                        self.scale,
+                    );
+                    let label_y = content_y
+                        + ((content_height - option_text_height(option, self.scale)) / 2.0)
+                            .max(0.0);
+
+                    self.context.layer_manager.maybe_with_layer(
+                        scene,
+                        label_clip.width() > 0.0 && label_clip.height() > 0.0,
+                        1.0,
                         self.transform,
-                        closed_option_label_x(
-                            self.node,
-                            option,
-                            content_x,
-                            content_width,
-                            self.scale,
-                        ),
-                        content_y
-                            + ((content_height - option_text_height(option, self.scale)) / 2.0)
-                                .max(0.0),
+                        &label_clip,
+                        |scene| {
+                            draw_option_label(
+                                scene,
+                                self.context.dom,
+                                option,
+                                self.transform,
+                                label_x,
+                                label_y,
+                            );
+                        },
                     );
                 }
 
@@ -329,15 +351,17 @@ fn closed_option_label_x(
     let right_padding = left_padding + SELECT_CHEVRON_RESERVED_WIDTH * scale;
     let available_width = (content_width - left_padding - right_padding).max(0.0);
     let (text_origin_x, text_width) = option_text_bounds(option, scale);
-    let text_align = match (select_text_align(node), available_width - text_width) {
-        // Like CSS, don't apply center/right alignment when the content doesn't fit.
-        (align, free_space) if free_space > 0.0 => align,
-        _ => TextAlignKeyword::Start,
+    let text_width = text_width.min(available_width);
+    let text_align = if text_width < available_width {
+        select_text_align(node)
+    } else {
+        TextAlignKeyword::Start
     };
 
     match text_align {
         TextAlignKeyword::Center | TextAlignKeyword::MozCenter => {
-            content_x + left_padding + (available_width - text_width) / 2.0 - text_origin_x
+            content_x + left_padding + ((available_width - text_width) / 2.0).max(0.0)
+                - text_origin_x
         }
         TextAlignKeyword::Right | TextAlignKeyword::End | TextAlignKeyword::MozRight => {
             content_x + content_width - right_padding - text_width - text_origin_x
