@@ -4,6 +4,7 @@ use crate::text::stroke_text;
 use anyrender::PaintScene;
 use blitz_dom::{BaseDocument, Node, local_name, node::SelectMode, util::ToColorColor as _};
 use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, Rect, RoundedRect, Stroke, Vec2};
+use parley::PositionedLayoutItem;
 use peniko::Fill;
 use style::dom::TElement as _;
 use style::values::specified::TextAlignKeyword;
@@ -301,8 +302,35 @@ fn option_text_height(option: &blitz_dom::node::SelectOption, scale: f64) -> f64
     (option.layout.height() as f64 / option.layout.scale() as f64) * scale
 }
 
-fn option_text_width(option: &blitz_dom::node::SelectOption, scale: f64) -> f64 {
-    (option.layout.full_width() as f64 / option.layout.scale() as f64) * scale
+fn option_text_bounds(option: &blitz_dom::node::SelectOption, scale: f64) -> (f64, f64) {
+    let scale = scale / option.layout.scale() as f64;
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+
+    for line in option.layout.lines() {
+        for item in line.items() {
+            match item {
+                PositionedLayoutItem::GlyphRun(glyph_run) => {
+                    let start = glyph_run.offset() as f64 * scale;
+                    let end = (glyph_run.offset() + glyph_run.advance()) as f64 * scale;
+                    min_x = min_x.min(start);
+                    max_x = max_x.max(end);
+                }
+                PositionedLayoutItem::InlineBox(inline_box) => {
+                    let start = inline_box.x as f64 * scale;
+                    let end = (inline_box.x + inline_box.width) as f64 * scale;
+                    min_x = min_x.min(start);
+                    max_x = max_x.max(end);
+                }
+            }
+        }
+    }
+
+    if min_x.is_finite() && max_x.is_finite() {
+        (min_x, (max_x - min_x).max(0.0))
+    } else {
+        (0.0, 0.0)
+    }
 }
 
 fn option_label_x(
@@ -321,21 +349,23 @@ fn option_label_x(
             0.0
         };
     let available_width = (content_width - left_padding - right_padding).max(0.0);
-    let text_width = option_text_width(option, scale).min(available_width);
+    let (text_origin_x, text_width) = option_text_bounds(option, scale);
+    let text_width = text_width.min(available_width);
 
     match select_text_align(node) {
         TextAlignKeyword::Center | TextAlignKeyword::MozCenter => {
             content_x + left_padding + ((available_width - text_width) / 2.0).max(0.0)
+                - text_origin_x
         }
         TextAlignKeyword::Right | TextAlignKeyword::End | TextAlignKeyword::MozRight => {
-            content_x + content_width - right_padding - text_width
+            content_x + content_width - right_padding - text_width - text_origin_x
         }
-        _ => content_x + left_padding,
+        _ => content_x + left_padding - text_origin_x,
     }
 }
 
 fn option_fill_color(
-    dom: &BaseDocument,
+    _dom: &BaseDocument,
     node: &Node,
     focused: bool,
     selected: bool,
@@ -345,18 +375,15 @@ fn option_fill_color(
         return None;
     }
 
-    let background = resolved_popup_background_color(dom, node);
-    let highlight = resolved_option_highlight_color(node, background);
-    let emphasis = match (focused, selected, active) {
-        (true, true, true) => 0.48,
-        (true, true, false) => 0.42,
-        (_, true, true) => 0.38,
-        (_, true, false) => 0.32,
-        (_, false, true) => 0.24,
+    let [r, g, b, _] = resolved_select_foreground_color(node).components;
+    let alpha = match (focused, selected, active) {
+        (_, _, true) => 0.4,
+        (true, true, false) => 0.32,
+        (_, true, false) => 0.24,
         _ => 0.0,
     };
 
-    Some(blend_colors(background, highlight, emphasis))
+    Some(Color::new([r, g, b, alpha]))
 }
 
 fn draw_option_label(
@@ -421,15 +448,6 @@ fn resolved_select_border_color(node: &Node) -> Color {
         .unwrap_or_else(|| Color::from_rgba8(120, 120, 120, 255))
 }
 
-fn resolved_option_highlight_color(node: &Node, background: Color) -> Color {
-    let border = resolved_select_border_color(node);
-    if color_distance(border, background) >= 0.18 {
-        border
-    } else {
-        resolved_select_foreground_color(node)
-    }
-}
-
 fn resolved_popup_background_color(dom: &BaseDocument, node: &Node) -> Color {
     node.primary_styles()
         .map(|style| {
@@ -443,25 +461,6 @@ fn resolved_popup_background_color(dom: &BaseDocument, node: &Node) -> Color {
         .filter(|color| *color != Color::TRANSPARENT)
         .or_else(|| document_background_color(dom))
         .unwrap_or(Color::WHITE)
-}
-
-fn blend_colors(background: Color, foreground: Color, amount: f32) -> Color {
-    let [bg_r, bg_g, bg_b, bg_a] = background.components;
-    let [fg_r, fg_g, fg_b, fg_a] = foreground.components;
-    let amount = (amount * fg_a).clamp(0.0, 1.0);
-
-    Color::new([
-        bg_r + (fg_r - bg_r) * amount,
-        bg_g + (fg_g - bg_g) * amount,
-        bg_b + (fg_b - bg_b) * amount,
-        bg_a + (1.0 - bg_a) * amount,
-    ])
-}
-
-fn color_distance(a: Color, b: Color) -> f32 {
-    let [a_r, a_g, a_b, _] = a.components;
-    let [b_r, b_g, b_b, _] = b.components;
-    ((a_r - b_r).abs() + (a_g - b_g).abs() + (a_b - b_b).abs()) / 3.0
 }
 
 fn document_background_color(dom: &BaseDocument) -> Option<Color> {
