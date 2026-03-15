@@ -496,7 +496,7 @@ pub(crate) fn handle_click(
                     .map(|select| (select.mode, select.open))
                     .unwrap_or((crate::node::SelectMode::Dropdown, false));
                 let is_multiple = el.attr(local_name!("multiple")).is_some();
-                let mut native_menu: Option<(NativeSelectMenuRequest, Vec<bool>)> = None;
+                let mut native_menu: Option<NativeSelectMenuRequest> = None;
                 if matches!(mode.0, crate::node::SelectMode::Dropdown) && !mode.1 {
                     if let Some(select) = el.select_data() {
                         // Prefer anchoring to the control itself (works for label->select synthetic clicks).
@@ -518,16 +518,12 @@ pub(crate) fn handle_click(
                                 disabled: option.disabled,
                             })
                             .collect::<Vec<_>>();
-                        let disabled = items.iter().map(|item| item.disabled).collect::<Vec<_>>();
-                        native_menu = Some((
-                            NativeSelectMenuRequest {
-                                select_id: node_id,
-                                items,
-                                selected_index,
-                                position: Some((anchor_x, anchor_y)),
-                            },
-                            disabled,
-                        ));
+                        native_menu = Some(NativeSelectMenuRequest {
+                            select_id: node_id,
+                            items,
+                            selected_index,
+                            position: Some((anchor_x, anchor_y)),
+                        });
                     }
                 }
 
@@ -556,19 +552,8 @@ pub(crate) fn handle_click(
                             let _ = doc.close_open_select();
                         } else {
                             let mut opened_native = false;
-                            if let Some((req, disabled)) = native_menu.take() {
-                                if let Some(index) = doc.shell_provider.open_native_select_menu(req)
-                                {
-                                    if disabled.get(index).is_some_and(|is_disabled| !*is_disabled)
-                                    {
-                                        let _ = doc.set_select_indices(
-                                            node_id,
-                                            &[index],
-                                            &mut *dispatch_event,
-                                        );
-                                        opened_native = true;
-                                    }
-                                }
+                            if let Some(req) = native_menu.take() {
+                                opened_native = doc.shell_provider.request_native_select_menu(req);
                             }
 
                             if !opened_native {

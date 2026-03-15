@@ -9,7 +9,7 @@ use peniko::Fill;
 use style::dom::TElement as _;
 use style::values::specified::TextAlignKeyword;
 
-const SELECT_TEXT_PADDING: f64 = 4.0;
+const SELECT_TEXT_PADDING: f64 = 3.0;
 const SELECT_CHEVRON_RESERVED_WIDTH: f64 = 18.0;
 
 impl ElementCx<'_> {

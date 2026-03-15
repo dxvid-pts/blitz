@@ -182,6 +182,7 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
             UiEvent::KeyUp(_) => focussed_node_id,
             UiEvent::KeyDown(_) => focussed_node_id,
             UiEvent::Ime(_) => focussed_node_id,
+            UiEvent::NativeSelect { select_id, .. } => Some(select_id),
         };
         let target = target.unwrap_or_else(|| self.doc.inner().root_element().id);
 
@@ -221,6 +222,15 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
             }
             UiEvent::Ime(data) => {
                 self.handle_dom_event(DomEvent::new(target, DomEventData::Ime(data)))
+            }
+            UiEvent::NativeSelect { select_id, index } => {
+                {
+                    let mut doc = self.doc.inner_mut();
+                    let _ = doc.set_select_indices(select_id, &[index], |new_evt| {
+                        self.queue.push_back(new_evt)
+                    });
+                }
+                self.process_queue();
             }
         };
 

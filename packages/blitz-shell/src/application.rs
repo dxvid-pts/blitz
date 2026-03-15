@@ -1,6 +1,7 @@
 use crate::event::{BlitzShellEvent, BlitzShellProxy};
 
 use anyrender::WindowRenderer;
+use blitz_traits::events::UiEvent;
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 use winit::application::ApplicationHandler;
@@ -53,6 +54,17 @@ impl<Rend: WindowRenderer> BlitzApplication<Rend> {
                 // TODO: Handle multiple documents per window
                 if let Some(window) = self.window_mut_by_doc_id(doc_id) {
                     window.request_redraw();
+                }
+            }
+            BlitzShellEvent::NativeSelect {
+                window_id,
+                select_id,
+                index,
+            } => {
+                if let Some(window) = self.windows.get_mut(&window_id) {
+                    window
+                        .doc
+                        .handle_ui_event(UiEvent::NativeSelect { select_id, index });
                 }
             }
 

@@ -66,6 +66,14 @@ pub trait ShellProvider: Send + Sync + 'static {
         let _ = req;
         None
     }
+
+    /// Request opening a platform-native select menu asynchronously.
+    ///
+    /// Returns `true` if the request was accepted (the menu will open), otherwise `false`.
+    fn request_native_select_menu(&self, req: NativeSelectMenuRequest) -> bool {
+        let _ = req;
+        false
+    }
 }
 
 pub struct DummyShellProvider;

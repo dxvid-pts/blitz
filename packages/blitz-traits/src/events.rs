@@ -63,6 +63,7 @@ pub enum UiEvent {
     KeyUp(BlitzKeyEvent),
     KeyDown(BlitzKeyEvent),
     Ime(BlitzImeEvent),
+    NativeSelect { select_id: usize, index: usize },
 }
 impl UiEvent {
     pub fn discriminant(&self) -> u8 {

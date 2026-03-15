@@ -18,6 +18,12 @@ pub enum BlitzShellEvent {
         doc_id: usize,
     },
 
+    NativeSelect {
+        window_id: WindowId,
+        select_id: usize,
+        index: usize,
+    },
+
     /// An accessibility event from `accesskit`.
     #[cfg(feature = "accessibility")]
     Accessibility {

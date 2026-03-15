@@ -146,7 +146,7 @@ impl BaseDocument {
             .as_ref()
             .map(|styles| {
                 let parley_style = stylo_to_parley::style(select_id, styles);
-                resolve_line_height(parley_style.line_height, parley_style.font_size) + 4.0
+                resolve_line_height(parley_style.line_height, parley_style.font_size) + 3.0
             })
             .unwrap_or(22.0);
         drop(select_styles);

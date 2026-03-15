@@ -89,10 +89,11 @@ pub fn current_android_app() -> android_activity::AndroidApp {
 
 pub struct BlitzShellProvider {
     window: Arc<dyn Window>,
+    proxy: BlitzShellProxy,
 }
 impl BlitzShellProvider {
-    pub fn new(window: Arc<dyn Window>) -> Self {
-        Self { window }
+    pub fn new(window: Arc<dyn Window>, proxy: BlitzShellProxy) -> Self {
+        Self { window, proxy }
     }
 }
 
@@ -124,71 +125,41 @@ impl ShellProvider for BlitzShellProvider {
         ));
     }
 
-    fn open_native_select_menu(&self, req: NativeSelectMenuRequest) -> Option<usize> {
+    fn request_native_select_menu(&self, req: NativeSelectMenuRequest) -> bool {
         #[cfg(target_os = "macos")]
         {
-            use muda::{CheckMenuItem, ContextMenu as _, MenuEvent, MenuId, Submenu};
+            use dispatch2::DispatchQueue;
 
-            let window_handle = self.window.window_handle().ok()?;
-            let ns_view = match window_handle.as_raw() {
-                RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr(),
-                _ => return None,
+            if req.items.is_empty() {
+                return false;
+            }
+
+            let ns_view = match self.window.window_handle().ok().map(|h| h.as_raw()) {
+                Some(RawWindowHandle::AppKit(handle)) => handle.ns_view.as_ptr() as usize,
+                _ => return false,
             };
 
-            let prefix = format!("blitz-select:{}:", req.select_id);
-            let submenu = Submenu::new("", true);
+            let proxy = self.proxy.clone();
+            let window_id = self.window.id();
 
-            // Build items.
-            if req.items.is_empty() {
-                return None;
-            }
-
-            let mut menu_items = Vec::with_capacity(req.items.len());
-            for (index, item) in req.items.into_iter().enumerate() {
-                let label = if item.label.contains('&') {
-                    item.label.replace('&', "&&")
-                } else {
-                    item.label
-                };
-                let id = MenuId::new(format!("{prefix}{index}"));
-                let menu_item = CheckMenuItem::with_id(
-                    id,
-                    label,
-                    !item.disabled,
-                    req.selected_index == Some(index),
-                    None,
-                );
-                let _ = submenu.append(&menu_item);
-                menu_items.push(menu_item);
-            }
-
-            let position = req
-                .position
-                .map(|(x, y)| muda::dpi::LogicalPosition::new(x as f64, y as f64).into());
-
-            // Best-effort: avoid selecting from a stale previous menu event.
-            while MenuEvent::receiver().try_recv().is_ok() {}
-
-            unsafe {
-                let _ = submenu.show_context_menu_for_nsview(ns_view, position);
-            }
-
-            while let Ok(event) = MenuEvent::receiver().try_recv() {
-                let id = event.id.as_ref();
-                if let Some(rest) = id.strip_prefix(&prefix)
-                    && let Ok(index) = rest.parse::<usize>()
-                {
-                    return Some(index);
+            DispatchQueue::main().exec_async(move || {
+                let ns_view = ns_view as *const std::ffi::c_void;
+                if let Some(index) = show_native_select_menu_macos(ns_view, &req) {
+                    proxy.send_event(BlitzShellEvent::NativeSelect {
+                        window_id,
+                        select_id: req.select_id,
+                        index,
+                    });
                 }
-            }
+            });
 
-            None
+            true
         }
 
         #[cfg(not(target_os = "macos"))]
         {
             let _ = req;
-            None
+            false
         }
     }
 
@@ -256,4 +227,57 @@ impl ShellProvider for BlitzShellProvider {
         };
         files.unwrap_or_default()
     }
+}
+
+#[cfg(target_os = "macos")]
+fn escape_muda_menu_label(label: &str) -> String {
+    // Muda uses '&' to mark mnemonics. Escape it so '&' renders as-is.
+    label.replace('&', "&&")
+}
+
+#[cfg(target_os = "macos")]
+fn show_native_select_menu_macos(
+    ns_view: *const std::ffi::c_void,
+    req: &NativeSelectMenuRequest,
+) -> Option<usize> {
+    use muda::ContextMenu as _;
+
+    // The receiver is global; drain it so we don't accidentally consume an old activation.
+    while muda::MenuEvent::receiver().try_recv().is_ok() {}
+
+    let menu_id_prefix = format!("blitz-select:{}:", req.select_id);
+    let menu = muda::Submenu::new("Select", true);
+    let mut items = Vec::with_capacity(req.items.len());
+
+    for (index, item) in req.items.iter().enumerate() {
+        let id = muda::MenuId::new(format!("{menu_id_prefix}{index}"));
+        let label = escape_muda_menu_label(&item.label);
+        let enabled = !item.disabled;
+        let checked = req.selected_index == Some(index);
+
+        let menu_item = muda::CheckMenuItem::with_id(id, label, enabled, checked, None);
+        if menu.append(&menu_item).is_err() {
+            return None;
+        }
+        items.push(menu_item);
+    }
+
+    let position = req
+        .position
+        .map(|(x, y)| muda::dpi::LogicalPosition::new(x as f64, y as f64).into());
+
+    // This call blocks while the native menu is open.
+    unsafe { menu.show_context_menu_for_nsview(ns_view, position) };
+
+    while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+        let id = event.id.as_ref();
+        if let Some(index) = id
+            .strip_prefix(&menu_id_prefix)
+            .and_then(|rest| rest.parse::<usize>().ok())
+        {
+            return Some(index);
+        }
+    }
+
+    None
 }
