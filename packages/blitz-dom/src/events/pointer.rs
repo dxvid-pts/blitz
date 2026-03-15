@@ -515,11 +515,8 @@ pub(crate) fn handle_click(
                                 && let Some(index) =
                                     doc.select_option_index_at_local_y(node_id, hit.y)
                             {
-                                let _ = doc.set_select_indices(
-                                    node_id,
-                                    &[index],
-                                    &mut *dispatch_event,
-                                );
+                                let _ =
+                                    doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
                             }
                             let _ = doc.close_open_select();
                         } else {
@@ -531,17 +528,11 @@ pub(crate) fn handle_click(
                             && let Some(index) = doc.select_option_index_at_local_y(node_id, hit.y)
                         {
                             if is_multiple {
-                                let _ = doc.activate_select_index(
-                                    node_id,
-                                    index,
-                                    &mut *dispatch_event,
-                                );
+                                let _ =
+                                    doc.activate_select_index(node_id, index, &mut *dispatch_event);
                             } else {
-                                let _ = doc.set_select_indices(
-                                    node_id,
-                                    &[index],
-                                    &mut *dispatch_event,
-                                );
+                                let _ =
+                                    doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
                             }
                         }
                     }

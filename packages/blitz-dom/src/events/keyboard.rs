@@ -135,9 +135,8 @@ fn handle_select_keypress<F: FnMut(DomEvent)>(
     let is_multiple = doc.select_is_multiple(node_id);
     let action_mod = event.modifiers.contains(ACTION_MOD);
     let alt_mod = event.modifiers.contains(Modifiers::ALT);
-    let sync_single_selection =
-        (matches!(mode, SelectMode::Dropdown) && !open)
-            || (matches!(mode, SelectMode::Listbox) && !is_multiple);
+    let sync_single_selection = (matches!(mode, SelectMode::Dropdown) && !open)
+        || (matches!(mode, SelectMode::Listbox) && !is_multiple);
 
     let mut moved = false;
     match &event.key {
@@ -183,11 +182,9 @@ fn handle_select_keypress<F: FnMut(DomEvent)>(
                     .or_else(|| doc.selected_option_indices(node_id).into_iter().next())
                 {
                     if is_multiple {
-                        let _ =
-                            doc.activate_select_index(node_id, index, &mut *dispatch_event);
+                        let _ = doc.activate_select_index(node_id, index, &mut *dispatch_event);
                     } else {
-                        let _ =
-                            doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
+                        let _ = doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
                     }
                 }
                 return true;
@@ -209,11 +206,9 @@ fn handle_select_keypress<F: FnMut(DomEvent)>(
                     .or_else(|| doc.selected_option_indices(node_id).into_iter().next())
                 {
                     if is_multiple {
-                        let _ =
-                            doc.activate_select_index(node_id, index, &mut *dispatch_event);
+                        let _ = doc.activate_select_index(node_id, index, &mut *dispatch_event);
                     } else {
-                        let _ =
-                            doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
+                        let _ = doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
                     }
                 }
                 return true;
@@ -228,8 +223,7 @@ fn handle_select_keypress<F: FnMut(DomEvent)>(
             if let Some(index) = doc.find_select_option_by_prefix(node_id, chars) {
                 moved = doc.set_select_active(node_id, index);
                 if sync_single_selection {
-                    let _ =
-                        doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
+                    let _ = doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
                 }
             }
         }
@@ -240,7 +234,11 @@ fn handle_select_keypress<F: FnMut(DomEvent)>(
         let _ = commit_select_active(doc, node_id, &mut *dispatch_event);
     }
 
-    moved || matches!(event.key, Key::Home | Key::End | Key::PageDown | Key::PageUp)
+    moved
+        || matches!(
+            event.key,
+            Key::Home | Key::End | Key::PageDown | Key::PageUp
+        )
 }
 
 #[cfg(target_os = "macos")]

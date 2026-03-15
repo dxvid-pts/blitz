@@ -181,8 +181,10 @@ impl ElementData {
     }
 
     pub fn can_be_disabled(&self) -> bool {
-        local_names!("button", "input", "select", "textarea", "option", "optgroup")
-            .contains(&self.name.local)
+        local_names!(
+            "button", "input", "select", "textarea", "option", "optgroup"
+        )
+        .contains(&self.name.local)
     }
 
     pub fn image_data(&self) -> Option<&ImageData> {

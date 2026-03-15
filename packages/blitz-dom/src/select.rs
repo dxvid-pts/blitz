@@ -32,7 +32,9 @@ fn option_is_disabled(doc: &BaseDocument, select_id: usize, option_id: usize) ->
             break;
         }
         let parent = &doc.nodes[parent_id];
-        if parent.data.is_element_with_tag_name(&local_name!("optgroup"))
+        if parent
+            .data
+            .is_element_with_tag_name(&local_name!("optgroup"))
             && parent.attr(local_name!("disabled")).is_some()
         {
             return true;
@@ -70,12 +72,9 @@ fn build_option_layout(
         .unwrap_or_default();
 
     let mut font_ctx = doc.font_ctx.lock().unwrap();
-    let mut builder = doc.layout_ctx.tree_builder(
-        &mut font_ctx,
-        doc.viewport.scale(),
-        true,
-        &parley_style,
-    );
+    let mut builder =
+        doc.layout_ctx
+            .tree_builder(&mut font_ctx, doc.viewport.scale(), true, &parley_style);
     builder.push_text(label);
     let mut layout = builder.build().0;
     let width = layout.calculate_content_widths().max.max(1.0);
@@ -127,7 +126,9 @@ impl BaseDocument {
                     let option_count = TreeTraverser::new_with_root(self, select_id)
                         .filter(|id| {
                             *id != select_id
-                                && self.nodes[*id].data.is_element_with_tag_name(&local_name!("option"))
+                                && self.nodes[*id]
+                                    .data
+                                    .is_element_with_tag_name(&local_name!("option"))
                                 && self.nodes[*id].is_element()
                         })
                         .count();
@@ -137,7 +138,9 @@ impl BaseDocument {
 
         let mut options = Vec::new();
         let mut selected_from_attr = Vec::new();
-        let controlled_value = select_element.attr(local_name!("value")).map(ToOwned::to_owned);
+        let controlled_value = select_element
+            .attr(local_name!("value"))
+            .map(ToOwned::to_owned);
         let select_styles = self.nodes[select_id].primary_styles();
         let row_height = select_styles
             .as_ref()
@@ -173,11 +176,10 @@ impl BaseDocument {
                 continue;
             };
 
-            let default_selected =
-                truthy_attr(option_element, LocalName::from("initial_selected"))
+            let default_selected = truthy_attr(option_element, LocalName::from("initial_selected"))
                 .unwrap_or(existing.default_selected);
-            let selected = truthy_attr(option_element, local_name!("selected"))
-                .unwrap_or(existing.selected);
+            let selected =
+                truthy_attr(option_element, local_name!("selected")).unwrap_or(existing.selected);
 
             if let Some(option_element) = self.nodes[option_id].element_data_mut() {
                 option_element.special_data = SpecialElementData::Option(OptionData {
@@ -310,8 +312,7 @@ impl BaseDocument {
 
     pub(crate) fn open_select(&mut self, select_id: usize) -> bool {
         let _ = self.close_open_select();
-        let default_active = self
-            .nodes[select_id]
+        let default_active = self.nodes[select_id]
             .element_data()
             .and_then(|element| element.select_data())
             .and_then(|select| {
@@ -352,7 +353,10 @@ impl BaseDocument {
     pub(crate) fn select_popup_hit(&self, x: f32, y: f32) -> Option<HitResult> {
         let select_id = self.open_select_id?;
         let bounds = self.select_popup_bounds(select_id)?;
-        if x < bounds.x || x > bounds.x + bounds.width || y < bounds.y || y > bounds.y + bounds.height
+        if x < bounds.x
+            || x > bounds.x + bounds.width
+            || y < bounds.y
+            || y > bounds.y + bounds.height
         {
             return None;
         }
@@ -376,7 +380,11 @@ impl BaseDocument {
         }
 
         let pos = node.absolute_position(0.0, 0.0);
-        let width = node.final_layout.size.width.max(self.select_popup_width(select_id));
+        let width = node
+            .final_layout
+            .size
+            .width
+            .max(self.select_popup_width(select_id));
         let height = select.row_height * select.popup_rows as f32;
         Some(SelectPopupBounds {
             x: pos.x,
@@ -404,11 +412,7 @@ impl BaseDocument {
             .iter()
             .map(|option| option.layout.full_width() + 24.0)
             .fold(0.0f32, f32::max);
-        self.nodes[select_id]
-            .final_layout
-            .size
-            .width
-            .max(widest)
+        self.nodes[select_id].final_layout.size.width.max(widest)
     }
 
     pub(crate) fn select_option_index_at_local_y(
@@ -448,7 +452,11 @@ impl BaseDocument {
             .element_data_mut()
             .and_then(|element| element.select_data_mut())
         {
-            if select.options.get(index).is_some_and(|option| !option.disabled) {
+            if select
+                .options
+                .get(index)
+                .is_some_and(|option| !option.disabled)
+            {
                 let did_change = select.active_index != Some(index);
                 select.active_index = Some(index);
                 did_change
@@ -765,10 +773,8 @@ mod tests {
 
         let select_id = {
             let mut mutator = document.mutate();
-            let select_id = mutator.create_element(
-                qual_name!("select"),
-                vec![attr("value", "banana")],
-            );
+            let select_id =
+                mutator.create_element(qual_name!("select"), vec![attr("value", "banana")]);
             mutator.append_children(root_id, &[select_id]);
             select_id
         };
@@ -779,8 +785,12 @@ mod tests {
             vec![attr("value", "apple"), bool_attr("selected")],
             "Apple",
         );
-        let second_option =
-            append_option(&mut document, select_id, vec![attr("value", "banana")], "Banana");
+        let second_option = append_option(
+            &mut document,
+            select_id,
+            vec![attr("value", "banana")],
+            "Banana",
+        );
 
         document.sync_select_control(select_id);
 
@@ -797,7 +807,10 @@ mod tests {
 
         assert!(!first_selected);
         assert!(second_selected);
-        assert_eq!(document.primary_select_value(select_id).as_deref(), Some("banana"));
+        assert_eq!(
+            document.primary_select_value(select_id).as_deref(),
+            Some("banana")
+        );
     }
 
     #[test]

@@ -6,6 +6,10 @@ use blitz_dom::{BaseDocument, Node, local_name, node::SelectMode, util::ToColorC
 use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, Rect, RoundedRect, Stroke, Vec2};
 use peniko::Fill;
 use style::dom::TElement as _;
+use style::values::specified::TextAlignKeyword;
+
+const SELECT_TEXT_PADDING: f64 = 6.0;
+const SELECT_CHEVRON_RESERVED_WIDTH: f64 = 18.0;
 
 impl ElementCx<'_> {
     pub(super) fn draw_input(&self, scene: &mut impl PaintScene) {
@@ -58,7 +62,6 @@ impl ElementCx<'_> {
         let content_width = self.node.final_layout.content_box_width() as f64 * self.scale;
         let content_height = self.node.final_layout.content_box_height() as f64 * self.scale;
         let row_height = select.row_height as f64 * self.scale;
-        let left_padding = 6.0 * self.scale;
         let chevron_inset = 14.0 * self.scale;
         let chevron_color = resolved_select_foreground_color(self.node);
 
@@ -77,7 +80,14 @@ impl ElementCx<'_> {
                         self.context.dom,
                         option,
                         self.transform,
-                        content_x + left_padding,
+                        option_label_x(
+                            self.node,
+                            option,
+                            content_x,
+                            content_width,
+                            self.scale,
+                            true,
+                        ),
                         content_y
                             + ((content_height - option_text_height(option, self.scale)) / 2.0)
                                 .max(0.0),
@@ -110,9 +120,13 @@ impl ElementCx<'_> {
                         .and_then(|element| element.option_data())
                         .is_some_and(|data| data.selected);
                     let is_active = select.active_index == Some(index);
-                    if let Some(fill) =
-                        option_fill_color(self.node.is_focussed(), is_selected, is_active)
-                    {
+                    if let Some(fill) = option_fill_color(
+                        self.context.dom,
+                        self.node,
+                        self.node.is_focussed(),
+                        is_selected,
+                        is_active,
+                    ) {
                         scene.fill(Fill::NonZero, self.transform, fill, None, &row_rect);
                     }
 
@@ -121,7 +135,14 @@ impl ElementCx<'_> {
                         self.context.dom,
                         option,
                         self.transform,
-                        content_x + left_padding,
+                        option_label_x(
+                            self.node,
+                            option,
+                            content_x,
+                            content_width,
+                            self.scale,
+                            false,
+                        ),
                         row_top
                             + ((row_height - option_text_height(option, self.scale)) / 2.0)
                                 .max(0.0),
@@ -194,7 +215,9 @@ impl BlitzDomPainter<'_> {
                 .and_then(|element| element.option_data())
                 .is_some_and(|data| data.selected);
             let is_active = select.active_index == Some(index);
-            if let Some(fill) = option_fill_color(node.is_focussed(), is_selected, is_active) {
+            if let Some(fill) =
+                option_fill_color(self.dom, node, node.is_focussed(), is_selected, is_active)
+            {
                 scene.fill(Fill::NonZero, transform, fill, None, &row_rect);
             }
 
@@ -203,7 +226,14 @@ impl BlitzDomPainter<'_> {
                 self.dom,
                 option,
                 transform,
-                6.0 * self.scale,
+                option_label_x(
+                    node,
+                    option,
+                    0.0,
+                    width as f64 * self.scale,
+                    self.scale,
+                    false,
+                ),
                 row_top + ((row_height - option_text_height(option, self.scale)) / 2.0).max(0.0),
             );
         }
@@ -271,16 +301,62 @@ fn option_text_height(option: &blitz_dom::node::SelectOption, scale: f64) -> f64
     (option.layout.height() as f64 / option.layout.scale() as f64) * scale
 }
 
-fn option_fill_color(focused: bool, selected: bool, active: bool) -> Option<Color> {
-    if focused && selected {
-        Some(Color::from_rgba8(0, 120, 215, 110))
-    } else if selected {
-        Some(Color::from_rgba8(180, 180, 180, 80))
-    } else if active {
-        Some(Color::from_rgba8(0, 0, 0, 24))
-    } else {
-        None
+fn option_text_width(option: &blitz_dom::node::SelectOption, scale: f64) -> f64 {
+    (option.layout.full_width() as f64 / option.layout.scale() as f64) * scale
+}
+
+fn option_label_x(
+    node: &Node,
+    option: &blitz_dom::node::SelectOption,
+    content_x: f64,
+    content_width: f64,
+    scale: f64,
+    reserve_chevron: bool,
+) -> f64 {
+    let left_padding = SELECT_TEXT_PADDING * scale;
+    let right_padding = left_padding
+        + if reserve_chevron {
+            SELECT_CHEVRON_RESERVED_WIDTH * scale
+        } else {
+            0.0
+        };
+    let available_width = (content_width - left_padding - right_padding).max(0.0);
+    let text_width = option_text_width(option, scale).min(available_width);
+
+    match select_text_align(node) {
+        TextAlignKeyword::Center | TextAlignKeyword::MozCenter => {
+            content_x + left_padding + ((available_width - text_width) / 2.0).max(0.0)
+        }
+        TextAlignKeyword::Right | TextAlignKeyword::End | TextAlignKeyword::MozRight => {
+            content_x + content_width - right_padding - text_width
+        }
+        _ => content_x + left_padding,
     }
+}
+
+fn option_fill_color(
+    dom: &BaseDocument,
+    node: &Node,
+    focused: bool,
+    selected: bool,
+    active: bool,
+) -> Option<Color> {
+    if !selected && !active {
+        return None;
+    }
+
+    let background = resolved_popup_background_color(dom, node);
+    let highlight = resolved_option_highlight_color(node, background);
+    let emphasis = match (focused, selected, active) {
+        (true, true, true) => 0.48,
+        (true, true, false) => 0.42,
+        (_, true, true) => 0.38,
+        (_, true, false) => 0.32,
+        (_, false, true) => 0.24,
+        _ => 0.0,
+    };
+
+    Some(blend_colors(background, highlight, emphasis))
 }
 
 fn draw_option_label(
@@ -319,6 +395,12 @@ fn draw_select_chevron(
     );
 }
 
+fn select_text_align(node: &Node) -> TextAlignKeyword {
+    node.primary_styles()
+        .map(|style| style.clone_text_align())
+        .unwrap_or(TextAlignKeyword::Start)
+}
+
 fn resolved_select_foreground_color(node: &Node) -> Color {
     node.primary_styles()
         .map(|style| style.get_inherited_text().color.as_color_color())
@@ -339,6 +421,15 @@ fn resolved_select_border_color(node: &Node) -> Color {
         .unwrap_or_else(|| Color::from_rgba8(120, 120, 120, 255))
 }
 
+fn resolved_option_highlight_color(node: &Node, background: Color) -> Color {
+    let border = resolved_select_border_color(node);
+    if color_distance(border, background) >= 0.18 {
+        border
+    } else {
+        resolved_select_foreground_color(node)
+    }
+}
+
 fn resolved_popup_background_color(dom: &BaseDocument, node: &Node) -> Color {
     node.primary_styles()
         .map(|style| {
@@ -352,6 +443,25 @@ fn resolved_popup_background_color(dom: &BaseDocument, node: &Node) -> Color {
         .filter(|color| *color != Color::TRANSPARENT)
         .or_else(|| document_background_color(dom))
         .unwrap_or(Color::WHITE)
+}
+
+fn blend_colors(background: Color, foreground: Color, amount: f32) -> Color {
+    let [bg_r, bg_g, bg_b, bg_a] = background.components;
+    let [fg_r, fg_g, fg_b, fg_a] = foreground.components;
+    let amount = (amount * fg_a).clamp(0.0, 1.0);
+
+    Color::new([
+        bg_r + (fg_r - bg_r) * amount,
+        bg_g + (fg_g - bg_g) * amount,
+        bg_b + (fg_b - bg_b) * amount,
+        bg_a + (1.0 - bg_a) * amount,
+    ])
+}
+
+fn color_distance(a: Color, b: Color) -> f32 {
+    let [a_r, a_g, a_b, _] = a.components;
+    let [b_r, b_g, b_b, _] = b.components;
+    ((a_r - b_r).abs() + (a_g - b_g).abs() + (a_b - b_b).abs()) / 3.0
 }
 
 fn document_background_color(dom: &BaseDocument) -> Option<Color> {

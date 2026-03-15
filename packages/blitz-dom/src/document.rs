@@ -1346,6 +1346,12 @@ impl BaseDocument {
             return Some(CursorIcon::Text);
         }
 
+        if node.data.is_element_with_tag_name(&local_name!("select"))
+            && node.attr(local_name!("disabled")).is_none()
+        {
+            return Some(CursorIcon::Pointer);
+        }
+
         // Use "pointer" cursor if any ancestor is a link
         let mut maybe_node = Some(node);
         while let Some(node) = maybe_node {

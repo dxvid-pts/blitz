@@ -86,7 +86,10 @@ impl BaseDocument {
             builder.set_role(role);
             builder.set_html_tag(name);
 
-            if node.element_state.contains(style_dom::ElementState::DISABLED) {
+            if node
+                .element_state
+                .contains(style_dom::ElementState::DISABLED)
+            {
                 builder.set_disabled();
             }
 
