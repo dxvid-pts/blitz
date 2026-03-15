@@ -424,8 +424,10 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Checked => self
                 .data
                 .downcast_element()
-                .and_then(|elem| elem.checkbox_input_checked())
-                .unwrap_or(false),
+                .is_some_and(|elem| {
+                    elem.checkbox_input_checked().unwrap_or(false)
+                        || elem.option_selected().unwrap_or(false)
+                }),
             NonTSPseudoClass::Valid => false,
             NonTSPseudoClass::Invalid => false,
             NonTSPseudoClass::Defined => false,

@@ -65,6 +65,12 @@ impl Drop for DocumentMutator<'_> {
 }
 
 impl DocumentMutator<'_> {
+    fn sync_select_ancestor(&mut self, node_id: usize) {
+        if let Some(select_id) = self.doc.enclosing_select_id(node_id) {
+            self.doc.sync_select_control(select_id);
+        }
+    }
+
     pub fn new<'doc>(doc: &'doc mut BaseDocument) -> DocumentMutator<'doc> {
         DocumentMutator {
             doc,
@@ -176,6 +182,7 @@ impl DocumentMutator<'_> {
             }
 
             self.maybe_record_node(parent_id);
+            self.sync_select_ancestor(node_id);
         }
     }
 
@@ -186,6 +193,7 @@ impl DocumentMutator<'_> {
         match node.text_data_mut() {
             Some(data) => {
                 data.content += text;
+                self.sync_select_ancestor(node_id);
                 Ok(())
             }
             None => Err(AppendTextErr::NotTextNode),
@@ -213,6 +221,7 @@ impl DocumentMutator<'_> {
 
     pub fn set_attribute(&mut self, node_id: usize, name: QualName, value: &str) {
         self.doc.snapshot_node(node_id);
+        let select_sync_target = self.doc.enclosing_select_id(node_id);
 
         let node = &mut self.doc.nodes[node_id];
         if let Some(data) = &mut *node.stylo_element_data.borrow_mut() {
@@ -258,23 +267,35 @@ impl DocumentMutator<'_> {
                     value,
                 );
             }
+            if let Some(select_id) = select_sync_target {
+                self.doc.sync_select_control(select_id);
+            }
             return;
         }
 
         if *attr == local_name!("style") {
             element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data());
             node.mark_style_attr_updated();
+            if let Some(select_id) = select_sync_target {
+                self.doc.sync_select_control(select_id);
+            }
             return;
         }
 
         if *attr == local_name!("disabled") && element.can_be_disabled() {
             node.disable();
+            if let Some(select_id) = select_sync_target {
+                self.doc.sync_select_control(select_id);
+            }
             return;
         }
 
         // If node if not in the document, then don't apply any special behaviours
         // and simply set the attribute value
         if !node.flags.is_in_document() {
+            if let Some(select_id) = select_sync_target {
+                self.doc.sync_select_control(select_id);
+            }
             return;
         }
 
@@ -287,10 +308,15 @@ impl DocumentMutator<'_> {
         } else if (tag, attr) == tag_and_attr!("link", "href") {
             self.load_linked_stylesheet(node_id);
         }
+
+        if let Some(select_id) = select_sync_target {
+            self.doc.sync_select_control(select_id);
+        }
     }
 
     pub fn clear_attribute(&mut self, node_id: usize, name: QualName) {
         self.doc.snapshot_node(node_id);
+        let select_sync_target = self.doc.enclosing_select_id(node_id);
 
         let node = &mut self.doc.nodes[node_id];
 
@@ -335,6 +361,9 @@ impl DocumentMutator<'_> {
 
         if *attr == local_name!("disabled") && element.can_be_disabled() {
             node.enable();
+            if let Some(select_id) = select_sync_target {
+                self.doc.sync_select_control(select_id);
+            }
             return;
         }
 
@@ -345,6 +374,10 @@ impl DocumentMutator<'_> {
             self.recompute_is_animating = true;
         } else if (tag, attr) == tag_and_attr!("link", "href") {
             self.unload_stylesheet(node_id);
+        }
+
+        if let Some(select_id) = select_sync_target {
+            self.doc.sync_select_control(select_id);
         }
     }
 
@@ -678,6 +711,8 @@ impl<'doc> DocumentMutator<'doc> {
                 SpecialElementData::TableRoot(_) => {}
                 SpecialElementData::TextInput(_) => {}
                 SpecialElementData::CheckboxInput(_) => {}
+                SpecialElementData::Select(_) => {}
+                SpecialElementData::Option(_) => {}
                 #[cfg(feature = "file_input")]
                 SpecialElementData::FileInput(_) => {}
                 SpecialElementData::None => {}

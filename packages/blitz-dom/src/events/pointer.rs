@@ -199,6 +199,14 @@ pub(crate) fn handle_pointermove<F: FnMut(DomEvent)>(
         return changed;
     }
 
+    if doc.nodes[target]
+        .data
+        .is_element_with_tag_name(&local_name!("select"))
+    {
+        changed |= doc.set_select_active_from_local_y(target, hit.y);
+        return changed;
+    }
+
     let node = &mut doc.nodes[target];
     let Some(el) = node.data.downcast_element_mut() else {
         // Handle text selection extension for non-element nodes
@@ -279,7 +287,17 @@ pub(crate) fn handle_pointerdown(
     doc.drag_mode = DragMode::None;
     doc.scroll_animation = ScrollAnimationState::None;
 
-    let Some(hit) = doc.hit(x, y) else {
+    let hit = doc.hit(x, y);
+    if let Some(open_select_id) = doc.open_select_id
+        && hit
+            .as_ref()
+            .map(|hit| hit.node_id != open_select_id)
+            .unwrap_or(true)
+    {
+        doc.close_open_select();
+    }
+
+    let Some(hit) = hit else {
         // Clear text selection when clicking outside any element
         doc.clear_text_selection();
         return;
@@ -295,6 +313,7 @@ pub(crate) fn handle_pointerdown(
         TextInput {
             content_box_offset: taffy::Point<f32>,
         },
+        Select,
         Disabled,
         SelectableText,
     }
@@ -303,6 +322,7 @@ pub(crate) fn handle_pointerdown(
         let node = &doc.nodes[actual_target];
         match node.data.downcast_element() {
             Some(el) if el.has_attr(local_name!("disabled")) => ClickTarget::Disabled,
+            Some(el) if el.name.local == local_name!("select") => ClickTarget::Select,
             Some(el) => {
                 if let SpecialElementData::TextInput(ref text_input_data) = el.special_data {
                     let mut content_box_offset = taffy::Point {
@@ -327,6 +347,17 @@ pub(crate) fn handle_pointerdown(
 
     match click_target {
         ClickTarget::Disabled => (),
+        ClickTarget::Select => {
+            doc.clear_text_selection();
+            let _ = doc.set_select_active_from_local_y(actual_target, hit.y);
+            generate_focus_events(
+                doc,
+                &mut |doc| {
+                    doc.set_focus_to(actual_target);
+                },
+                dispatch_event,
+            );
+        }
         ClickTarget::SelectableText => {
             // Handle text selection for non-input elements
             if let Some((inline_root_id, byte_offset)) = doc.find_text_position(x, y) {
@@ -442,6 +473,83 @@ pub(crate) fn handle_click(
     let mut maybe_node_id = Some(target);
     let matched = 'matched: {
         while let Some(node_id) = maybe_node_id {
+            let Some(el) = doc.nodes[node_id].element_data() else {
+                maybe_node_id = doc.nodes[node_id].parent;
+                continue;
+            };
+
+            if el.attr(local_name!("disabled")).is_some() {
+                break 'matched true;
+            }
+
+            if let SpecialElementData::TextInput(_) = el.special_data {
+                break 'matched true;
+            }
+
+            if el.name.local == local_name!("select") {
+                let hit = doc
+                    .hit(event.page_x(), event.page_y())
+                    .filter(|hit| hit.node_id == node_id);
+                let mode = el
+                    .select_data()
+                    .map(|select| (select.mode, select.open))
+                    .unwrap_or((crate::node::SelectMode::Dropdown, false));
+                let is_multiple = el.attr(local_name!("multiple")).is_some();
+
+                if let Some(hit) = hit {
+                    let _ = doc.set_select_active_from_local_y(node_id, hit.y);
+                }
+
+                generate_focus_events(
+                    doc,
+                    &mut |doc| {
+                        doc.set_focus_to(node_id);
+                    },
+                    dispatch_event,
+                );
+
+                match mode.0 {
+                    crate::node::SelectMode::Dropdown => {
+                        if mode.1 {
+                            if let Some(hit) = hit
+                                && let Some(index) =
+                                    doc.select_option_index_at_local_y(node_id, hit.y)
+                            {
+                                let _ = doc.set_select_indices(
+                                    node_id,
+                                    &[index],
+                                    &mut *dispatch_event,
+                                );
+                            }
+                            let _ = doc.close_open_select();
+                        } else {
+                            let _ = doc.open_select(node_id);
+                        }
+                    }
+                    crate::node::SelectMode::Listbox => {
+                        if let Some(hit) = hit
+                            && let Some(index) = doc.select_option_index_at_local_y(node_id, hit.y)
+                        {
+                            if is_multiple {
+                                let _ = doc.activate_select_index(
+                                    node_id,
+                                    index,
+                                    &mut *dispatch_event,
+                                );
+                            } else {
+                                let _ = doc.set_select_indices(
+                                    node_id,
+                                    &[index],
+                                    &mut *dispatch_event,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                break 'matched true;
+            }
+
             let maybe_element = {
                 let node = &mut doc.nodes[node_id];
                 node.data.downcast_element_mut()

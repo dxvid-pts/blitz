@@ -1,6 +1,6 @@
 use crate::{
     BaseDocument,
-    node::{TextBrush, TextInputData},
+    node::{SelectMode, TextBrush, TextInputData},
 };
 use blitz_traits::{
     events::{BlitzInputEvent, BlitzKeyEvent, DomEvent, DomEventData},
@@ -57,6 +57,10 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
             return;
         }
 
+        if handle_select_keypress(doc, node_id, &event, &mut dispatch_event) {
+            return;
+        }
+
         let node = &mut doc.nodes[node_id];
         let Some(element_data) = node.element_data_mut() else {
             return;
@@ -92,6 +96,151 @@ pub(crate) fn handle_keypress<F: FnMut(DomEvent)>(
             }
         }
     }
+}
+
+fn commit_select_active<F: FnMut(DomEvent)>(
+    doc: &mut BaseDocument,
+    node_id: usize,
+    dispatch_event: &mut F,
+) -> bool {
+    let Some(index) = doc
+        .select_active_index(node_id)
+        .or_else(|| doc.selected_option_indices(node_id).into_iter().next())
+    else {
+        return false;
+    };
+    doc.set_select_indices(node_id, &[index], dispatch_event)
+}
+
+fn handle_select_keypress<F: FnMut(DomEvent)>(
+    doc: &mut BaseDocument,
+    node_id: usize,
+    event: &BlitzKeyEvent,
+    dispatch_event: &mut F,
+) -> bool {
+    if !event.state.is_pressed() {
+        return false;
+    }
+
+    let Some(element) = doc.nodes[node_id].element_data() else {
+        return false;
+    };
+    let Some(select_data) = element.select_data() else {
+        return false;
+    };
+
+    let mode = select_data.mode;
+    let open = select_data.open;
+    let visible_rows = select_data.visible_rows.max(1);
+    let is_multiple = doc.select_is_multiple(node_id);
+    let action_mod = event.modifiers.contains(ACTION_MOD);
+    let alt_mod = event.modifiers.contains(Modifiers::ALT);
+    let sync_single_selection =
+        (matches!(mode, SelectMode::Dropdown) && !open)
+            || (matches!(mode, SelectMode::Listbox) && !is_multiple);
+
+    let mut moved = false;
+    match &event.key {
+        Key::ArrowDown => {
+            moved = doc.move_select_active(node_id, 1);
+        }
+        Key::ArrowUp => {
+            moved = doc.move_select_active(node_id, -1);
+        }
+        Key::PageDown => {
+            moved = doc.move_select_active(node_id, visible_rows as isize);
+        }
+        Key::PageUp => {
+            moved = doc.move_select_active(node_id, -(visible_rows as isize));
+        }
+        Key::Home => {
+            if let Some(index) = doc.first_enabled_select_index(node_id) {
+                moved = doc.set_select_active(node_id, index);
+            }
+        }
+        Key::End => {
+            if let Some(index) = doc.last_enabled_select_index(node_id) {
+                moved = doc.set_select_active(node_id, index);
+            }
+        }
+        Key::Escape if open => {
+            let _ = doc.close_open_select();
+            return true;
+        }
+        Key::Enter => match mode {
+            SelectMode::Dropdown => {
+                if open {
+                    let _ = commit_select_active(doc, node_id, dispatch_event);
+                    let _ = doc.close_open_select();
+                } else {
+                    let _ = doc.open_select(node_id);
+                }
+                return true;
+            }
+            SelectMode::Listbox => {
+                if let Some(index) = doc
+                    .select_active_index(node_id)
+                    .or_else(|| doc.selected_option_indices(node_id).into_iter().next())
+                {
+                    if is_multiple {
+                        let _ =
+                            doc.activate_select_index(node_id, index, &mut *dispatch_event);
+                    } else {
+                        let _ =
+                            doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
+                    }
+                }
+                return true;
+            }
+        },
+        Key::Character(chars) if chars == " " => match mode {
+            SelectMode::Dropdown => {
+                if open {
+                    let _ = commit_select_active(doc, node_id, dispatch_event);
+                    let _ = doc.close_open_select();
+                } else {
+                    let _ = doc.open_select(node_id);
+                }
+                return true;
+            }
+            SelectMode::Listbox => {
+                if let Some(index) = doc
+                    .select_active_index(node_id)
+                    .or_else(|| doc.selected_option_indices(node_id).into_iter().next())
+                {
+                    if is_multiple {
+                        let _ =
+                            doc.activate_select_index(node_id, index, &mut *dispatch_event);
+                    } else {
+                        let _ =
+                            doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
+                    }
+                }
+                return true;
+            }
+        },
+        Key::Character(chars)
+            if !chars.trim().is_empty()
+                && !action_mod
+                && !alt_mod
+                && chars.chars().count() == 1 =>
+        {
+            if let Some(index) = doc.find_select_option_by_prefix(node_id, chars) {
+                moved = doc.set_select_active(node_id, index);
+                if sync_single_selection {
+                    let _ =
+                        doc.set_select_indices(node_id, &[index], &mut *dispatch_event);
+                }
+            }
+        }
+        _ => return false,
+    }
+
+    if moved && sync_single_selection {
+        let _ = commit_select_active(doc, node_id, &mut *dispatch_event);
+    }
+
+    moved || matches!(event.key, Key::Home | Key::End | Key::PageDown | Key::PageUp)
 }
 
 #[cfg(target_os = "macos")]

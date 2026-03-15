@@ -76,6 +76,8 @@ pub enum SpecialElementType {
     TableRoot,
     TextInput,
     CheckboxInput,
+    Select,
+    Option,
     #[cfg(feature = "file_input")]
     FileInput,
     #[default]
@@ -98,6 +100,10 @@ pub enum SpecialElementData {
     TextInput(TextInputData),
     /// Checkbox checked state
     CheckboxInput(bool),
+    /// State for select widgets
+    Select(SelectData),
+    /// State for option elements
+    Option(OptionData),
     /// Selected files
     #[cfg(feature = "file_input")]
     FileInput(FileData),
@@ -116,6 +122,8 @@ impl Clone for SpecialElementData {
             Self::TableRoot(data) => Self::TableRoot(data.clone()),
             Self::TextInput(data) => Self::TextInput(data.clone()),
             Self::CheckboxInput(data) => Self::CheckboxInput(*data),
+            Self::Select(data) => Self::Select(data.clone()),
+            Self::Option(data) => Self::Option(data.clone()),
             #[cfg(feature = "file_input")]
             Self::FileInput(data) => Self::FileInput(data.clone()),
             Self::None => Self::None,
@@ -173,7 +181,8 @@ impl ElementData {
     }
 
     pub fn can_be_disabled(&self) -> bool {
-        local_names!("button", "input", "select", "textarea").contains(&self.name.local)
+        local_names!("button", "input", "select", "textarea", "option", "optgroup")
+            .contains(&self.name.local)
     }
 
     pub fn image_data(&self) -> Option<&ImageData> {
@@ -259,6 +268,38 @@ impl ElementData {
             SpecialElementData::CheckboxInput(ref mut checked) => Some(checked),
             _ => None,
         }
+    }
+
+    pub fn select_data(&self) -> Option<&SelectData> {
+        match &self.special_data {
+            SpecialElementData::Select(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    pub fn select_data_mut(&mut self) -> Option<&mut SelectData> {
+        match &mut self.special_data {
+            SpecialElementData::Select(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    pub fn option_data(&self) -> Option<&OptionData> {
+        match &self.special_data {
+            SpecialElementData::Option(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    pub fn option_data_mut(&mut self) -> Option<&mut OptionData> {
+        match &mut self.special_data {
+            SpecialElementData::Option(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    pub fn option_selected(&self) -> Option<bool> {
+        self.option_data().map(|data| data.selected)
     }
 
     #[cfg(feature = "file_input")]
@@ -526,6 +567,52 @@ impl TextInputData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SelectMode {
+    #[default]
+    Dropdown,
+    Listbox,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OptionData {
+    pub selected: bool,
+    pub default_selected: bool,
+}
+
+#[derive(Clone)]
+pub struct SelectOption {
+    pub node_id: usize,
+    pub value: String,
+    pub label: String,
+    pub disabled: bool,
+    pub layout: Box<parley::Layout<TextBrush>>,
+}
+
+impl std::fmt::Debug for SelectOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SelectOption")
+            .field("node_id", &self.node_id)
+            .field("value", &self.value)
+            .field("label", &self.label)
+            .field("disabled", &self.disabled)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SelectData {
+    pub mode: SelectMode,
+    pub open: bool,
+    pub active_index: Option<usize>,
+    pub anchor_index: Option<usize>,
+    pub row_height: f32,
+    pub visible_rows: usize,
+    pub popup_rows: usize,
+    pub popup_scroll: f32,
+    pub options: Vec<SelectOption>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CanvasData {
     pub custom_paint_source_id: u64,
@@ -546,6 +633,8 @@ impl std::fmt::Debug for SpecialElementData {
             SpecialElementData::TableRoot(_) => f.write_str("NodeSpecificData::TableRoot"),
             SpecialElementData::TextInput(_) => f.write_str("NodeSpecificData::TextInput"),
             SpecialElementData::CheckboxInput(_) => f.write_str("NodeSpecificData::CheckboxInput"),
+            SpecialElementData::Select(_) => f.write_str("NodeSpecificData::Select"),
+            SpecialElementData::Option(_) => f.write_str("NodeSpecificData::Option"),
             #[cfg(feature = "file_input")]
             SpecialElementData::FileInput(_) => f.write_str("NodeSpecificData::FileInput"),
             SpecialElementData::None => f.write_str("NodeSpecificData::None"),

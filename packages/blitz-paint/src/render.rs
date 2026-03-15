@@ -161,6 +161,8 @@ impl<'dom> BlitzDomPainter<'dom> {
             },
         );
 
+        self.draw_open_select_popup(scene);
+
         // Render debug overlay
         if self.dom.devtools().highlight_hover {
             if let Some(node_id) = self.dom.as_ref().get_hover_node_id() {
@@ -231,9 +233,14 @@ impl<'dom> BlitzDomPainter<'dom> {
             .element_data()
             .and_then(|el| el.text_input_data())
             .is_some();
+        let is_select = node
+            .element_data()
+            .and_then(|el| el.select_data())
+            .is_some();
         let should_clip = is_image
             || is_sub_doc
             || is_text_input
+            || is_select
             || !matches!(overflow_x, Overflow::Visible)
             || !matches!(overflow_y, Overflow::Visible);
 
@@ -324,6 +331,7 @@ impl<'dom> BlitzDomPainter<'dom> {
                         cx.draw_canvas(scene);
                         cx.draw_sub_document(scene);
                         cx.draw_input(scene);
+                        cx.draw_select(scene);
                         cx.draw_text_input_text(scene, content_position);
                         cx.draw_inline_layout(scene, content_position);
                         cx.draw_marker(scene, content_position);

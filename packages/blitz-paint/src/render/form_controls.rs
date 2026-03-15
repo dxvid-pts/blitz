@@ -1,8 +1,9 @@
-use super::ElementCx;
+use super::{BlitzDomPainter, ElementCx};
 use crate::color::{Color, ToColorColor as _};
+use crate::text::stroke_text;
 use anyrender::PaintScene;
-use blitz_dom::local_name;
-use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, RoundedRect, Stroke, Vec2};
+use blitz_dom::{local_name, node::SelectMode};
+use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, Rect, RoundedRect, Stroke, Vec2};
 use peniko::Fill;
 use style::dom::TElement as _;
 
@@ -41,6 +42,150 @@ impl ElementCx<'_> {
                 draw_radio_button(scene, checked, center, self.transform, accent_color, scale);
             }
             _ => {}
+        }
+    }
+
+    pub(super) fn draw_select(&self, scene: &mut impl PaintScene) {
+        if self.node.local_name() != "select" {
+            return;
+        }
+        let Some(select) = self.element.select_data() else {
+            return;
+        };
+
+        let content_x = self.node.final_layout.content_box_x() as f64 * self.scale;
+        let content_y = self.node.final_layout.content_box_y() as f64 * self.scale;
+        let content_width = self.node.final_layout.content_box_width() as f64 * self.scale;
+        let content_height = self.node.final_layout.content_box_height() as f64 * self.scale;
+        let row_height = select.row_height as f64 * self.scale;
+
+        match select.mode {
+            SelectMode::Dropdown => {
+                if let Some((_, option)) = select.options.iter().enumerate().find(|(_, option)| {
+                    self.context
+                        .dom
+                        .get_node(option.node_id)
+                        .and_then(|node| node.element_data())
+                        .and_then(|element| element.option_data())
+                        .is_some_and(|data| data.selected)
+                }) {
+                    draw_option_label(
+                        scene,
+                        self.context.dom,
+                        option,
+                        self.transform,
+                        content_x + 6.0,
+                        content_y + ((content_height - option_text_height(option)) / 2.0).max(0.0),
+                    );
+                }
+
+                draw_select_chevron(
+                    scene,
+                    self.transform,
+                    content_x + content_width - 14.0,
+                    content_y + content_height / 2.0,
+                );
+            }
+            SelectMode::Listbox => {
+                for (index, option) in select.options.iter().enumerate() {
+                    let row_top = content_y + row_height * index as f64;
+                    let row_rect = Rect::new(
+                        content_x,
+                        row_top,
+                        content_x + content_width,
+                        row_top + row_height,
+                    );
+                    let is_selected = self
+                        .context
+                        .dom
+                        .get_node(option.node_id)
+                        .and_then(|node| node.element_data())
+                        .and_then(|element| element.option_data())
+                        .is_some_and(|data| data.selected);
+                    let is_active = select.active_index == Some(index);
+                    if let Some(fill) = option_fill_color(self.node.is_focussed(), is_selected, is_active)
+                    {
+                        scene.fill(Fill::NonZero, self.transform, fill, None, &row_rect);
+                    }
+
+                    draw_option_label(
+                        scene,
+                        self.context.dom,
+                        option,
+                        self.transform,
+                        content_x + 6.0,
+                        row_top + ((row_height - option_text_height(option)) / 2.0).max(0.0),
+                    );
+                }
+            }
+        }
+    }
+}
+
+impl BlitzDomPainter<'_> {
+    pub(super) fn draw_open_select_popup(&self, scene: &mut impl PaintScene) {
+        let Some(select_id) = self.dom.open_select_popup_id() else {
+            return;
+        };
+        let Some((x, y, width, height)) = self.dom.select_popup_rect(select_id) else {
+            return;
+        };
+        let Some(node) = self.dom.get_node(select_id) else {
+            return;
+        };
+        let Some(select) = node.element_data().and_then(|element| element.select_data()) else {
+            return;
+        };
+
+        let viewport_scroll = self.dom.viewport_scroll();
+        let popup_x = (self.initial_x - viewport_scroll.x + x as f64) * self.scale;
+        let popup_y = (self.initial_y - viewport_scroll.y + y as f64) * self.scale;
+        let transform = Affine::translate((popup_x, popup_y));
+        let popup_rect = Rect::new(0.0, 0.0, width as f64 * self.scale, height as f64 * self.scale);
+        let row_height = select.row_height as f64 * self.scale;
+
+        scene.fill(
+            Fill::NonZero,
+            transform,
+            Color::WHITE,
+            None,
+            &popup_rect,
+        );
+        scene.stroke(
+            &Stroke::new(1.0),
+            transform,
+            Color::from_rgba8(120, 120, 120, 255),
+            None,
+            &popup_rect,
+        );
+
+        for (index, option) in select.options.iter().enumerate() {
+            let row_top = row_height * index as f64;
+            let row_rect = Rect::new(
+                0.0,
+                row_top,
+                width as f64 * self.scale,
+                row_top + row_height,
+            );
+            let is_selected = self
+                .dom
+                .get_node(option.node_id)
+                .and_then(|node| node.element_data())
+                .and_then(|element| element.option_data())
+                .is_some_and(|data| data.selected);
+            let is_active = select.active_index == Some(index);
+            if let Some(fill) = option_fill_color(node.is_focussed(), is_selected, is_active) {
+                scene.fill(Fill::NonZero, transform, fill, None, &row_rect);
+            }
+
+            draw_option_label(
+                scene,
+                self.dom,
+                option,
+                transform,
+                6.0 * self.scale,
+                row_top + ((row_height - option_text_height(option)) / 2.0).max(0.0),
+            );
         }
     }
 }
@@ -100,4 +245,47 @@ fn draw_radio_button(
         scene.fill(Fill::NonZero, transform, GRAY, None, &outer_ring);
         scene.fill(Fill::NonZero, transform, Color::WHITE, None, &gap);
     }
+}
+
+fn option_text_height(option: &blitz_dom::node::SelectOption) -> f64 {
+    option.layout.height() as f64 / option.layout.scale() as f64
+}
+
+fn option_fill_color(focused: bool, selected: bool, active: bool) -> Option<Color> {
+    if focused && selected {
+        Some(Color::from_rgba8(0, 120, 215, 110))
+    } else if selected {
+        Some(Color::from_rgba8(180, 180, 180, 80))
+    } else if active {
+        Some(Color::from_rgba8(0, 0, 0, 24))
+    } else {
+        None
+    }
+}
+
+fn draw_option_label(
+    scene: &mut impl PaintScene,
+    dom: &blitz_dom::BaseDocument,
+    option: &blitz_dom::node::SelectOption,
+    transform: Affine,
+    x: f64,
+    y: f64,
+) {
+    let transform = Affine::translate((x, y)) * transform;
+    stroke_text(scene, option.layout.lines(), dom, transform);
+}
+
+fn draw_select_chevron(scene: &mut impl PaintScene, transform: Affine, x: f64, y: f64) {
+    let mut path = BezPath::new();
+    path.move_to((x - 4.0, y - 2.0));
+    path.line_to((x, y + 2.0));
+    path.line_to((x + 4.0, y - 2.0));
+
+    scene.stroke(
+        &Stroke::new(1.5),
+        transform,
+        Color::from_rgba8(80, 80, 80, 255),
+        None,
+        &path,
+    );
 }

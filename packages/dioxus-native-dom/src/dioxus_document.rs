@@ -12,7 +12,7 @@ use blitz_dom::{
 };
 use blitz_traits::events::{DomEvent, DomEventData, EventState, UiEvent};
 use dioxus_core::{ElementId, Event, VirtualDom};
-use dioxus_html::{set_event_converter, PlatformEventData};
+use dioxus_html::{FormValue, PlatformEventData, set_event_converter};
 use futures_util::task::noop_waker;
 use std::cell::RefCell;
 use std::future::Future;
@@ -306,10 +306,17 @@ impl EventHandler for DioxusEventHandler<'_> {
                 Some(wrap_event_data(BlitzKeyboardData(kevent.clone())))
             }
 
-            DomEventData::Input(data) => Some(wrap_event_data(NativeFormData {
+            DomEventData::Input(data) | DomEventData::Change(data) => Some(wrap_event_data(
+                NativeFormData {
                 value: data.value.clone(),
-                values: vec![],
-            })),
+                values: doc
+                    .inner()
+                    .form_event_values(event.target)
+                    .into_iter()
+                    .map(|(name, value)| (name, FormValue::Text(value)))
+                    .collect(),
+            },
+            )),
 
             // TODO: Implement IME handling
             DomEventData::Ime(_) => None,

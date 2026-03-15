@@ -7,7 +7,8 @@ mod node;
 pub use attributes::{Attribute, Attributes};
 pub use element::{
     BackgroundImageData, CanvasData, ElementData, ImageData, ListItemLayout,
-    ListItemLayoutPosition, Marker, RasterImageData, SpecialElementData, SpecialElementType,
-    Status, TextBrush, TextInputData, TextLayout,
+    ListItemLayoutPosition, Marker, OptionData, RasterImageData, SelectData, SelectMode,
+    SelectOption, SpecialElementData, SpecialElementType, Status, TextBrush, TextInputData,
+    TextLayout,
 };
 pub use node::*;

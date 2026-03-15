@@ -103,7 +103,7 @@ pub(crate) fn collect_layout_children(
     flush_pseudo_elements(doc, container_node_id);
 
     if let Some(el) = doc.nodes[container_node_id].data.downcast_element() {
-        // Handle text inputs
+        // Handle native form controls rendered as widgets
         let tag_name = el.name.local.as_ref();
         if matches!(tag_name, "input" | "textarea") {
             let type_attr: Option<&str> = doc.nodes[container_node_id]
@@ -123,6 +123,9 @@ pub(crate) fn collect_layout_children(
                 create_checkbox_input(doc, container_node_id);
                 return;
             }
+        } else if tag_name == "select" {
+            doc.sync_select_control(container_node_id);
+            return;
         }
 
         #[cfg(feature = "svg")]
@@ -741,6 +744,7 @@ pub(crate) fn find_inline_layout_embedded_boxes(
                         if *tag_name == local_name!("img")
                             || *tag_name == local_name!("svg")
                             || *tag_name == local_name!("input")
+                            || *tag_name == local_name!("select")
                             || *tag_name == local_name!("textarea")
                             || *tag_name == local_name!("button")
                         {

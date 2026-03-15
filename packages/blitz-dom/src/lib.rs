@@ -53,6 +53,7 @@ mod layout;
 mod mutator;
 mod query_selector;
 mod resolve;
+mod select;
 mod selection;
 /// Implementations that interact with servo's style engine
 mod stylo;

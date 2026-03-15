@@ -175,6 +175,41 @@ impl BaseDocument {
                     }
                 }
 
+                if *element_data.name.local == *"select" {
+                    let (preferred_width, preferred_height) = element_data
+                        .select_data()
+                        .map(|select_data| {
+                            let widest_option = select_data
+                                .options
+                                .iter()
+                                .map(|option| option.layout.full_width())
+                                .fold(0.0f32, f32::max);
+                            let width = (widest_option + 28.0).max(120.0);
+                            let rows = match select_data.mode {
+                                crate::node::SelectMode::Dropdown => 1.0,
+                                crate::node::SelectMode::Listbox => {
+                                    select_data.visible_rows.max(1) as f32
+                                }
+                            };
+                            let height = select_data.row_height.max(18.0) * rows;
+                            (width, height)
+                        })
+                        .unwrap_or((
+                            120.0,
+                            resolved_line_height.unwrap_or(font_size.unwrap_or(16.0)) + 6.0,
+                        ));
+
+                    return compute_leaf_layout(
+                        inputs,
+                        &node.style,
+                        resolve_calc_value,
+                        |_known_size, _available_space| taffy::Size {
+                            width: preferred_width,
+                            height: preferred_height,
+                        },
+                    );
+                }
+
                 if *element_data.name.local == *"img"
                     || *element_data.name.local == *"canvas"
                     || (cfg!(feature = "svg") && *element_data.name.local == *"svg")

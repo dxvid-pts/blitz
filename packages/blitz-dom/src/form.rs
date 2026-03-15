@@ -168,6 +168,151 @@ impl BaseDocument {
 
         self.navigation_provider.navigate_to(navigation_options)
     }
+
+    pub fn form_event_values(&self, control_id: usize) -> Vec<(String, String)> {
+        let entries = if let Some(form_id) = self.controls_to_form.get(&control_id).copied() {
+            construct_entry_list(self, form_id, form_id)
+        } else {
+            let mut entry_list = FormData::new();
+            append_control_entries(self, control_id, control_id, &mut |name, value| {
+                entry_list.0.push(Entry {
+                    name: name.to_string(),
+                    value,
+                });
+            });
+            entry_list
+        };
+
+        entries
+            .0
+            .into_iter()
+            .map(|entry| (entry.name, entry.value.as_ref().to_string()))
+            .collect()
+    }
+}
+
+fn datalist_ancestor(doc: &BaseDocument, node_id: usize) -> bool {
+    AncestorTraverser::new(doc, node_id).any(|node_id| {
+        doc.nodes[node_id]
+            .data
+            .is_element_with_tag_name(&local_name!("datalist"))
+    })
+}
+
+fn append_control_entries(
+    doc: &BaseDocument,
+    control_id: usize,
+    submitter_id: usize,
+    create_entry: &mut impl FnMut(&str, EntryValue),
+) {
+    let Some(node) = doc.get_node(control_id) else {
+        return;
+    };
+    let Some(element) = node.element_data() else {
+        return;
+    };
+
+    let element_type = element.attr(local_name!("type"));
+
+    //  If any of the following are true:
+    //   field has a datalist element ancestor;
+    //   field is disabled;
+    //   field is a button but it is not submitter;
+    //   field is an input element whose type attribute is in the Checkbox state and whose checkedness is false; or
+    //   field is an input element whose type attribute is in the Radio Button state and whose checkedness is false,
+    //  then continue.
+    if datalist_ancestor(doc, node.id)
+        || element.attr(local_name!("disabled")).is_some()
+        || (element.name.local == local_name!("button") && node.id != submitter_id)
+        || element.name.local == local_name!("input")
+            && ((matches!(element_type, Some("checkbox" | "radio"))
+                && !element.checkbox_input_checked().unwrap_or(false))
+                || matches!(element_type, Some("submit" | "button")))
+    {
+        return;
+    }
+
+    // If the field element is an input element whose type attribute is in the Image Button state, then:
+    if element_type == Some("image") {
+        // If the field element is not submitter, then continue.
+        if node.id != submitter_id {
+            return;
+        }
+        // TODO: If the field element has a name attribute specified and its value is not the empty string, let name be that value followed by U+002E (.). Otherwise, let name be the empty string.
+        //   Let namex be the concatenation of name and U+0078 (x).
+        //   Let namey be the concatenation of name and U+0079 (y).
+        //   Let (x, y) be the selected coordinate.
+        //   Create an entry with namex and x, and append it to entry list.
+        //   Create an entry with namey and y, and append it to entry list.
+        //   Continue.
+        return;
+    }
+
+    // TODO: If the field is a form-associated custom element,
+    //  then perform the entry construction algorithm given field and entry list,
+    //  then continue.
+
+    // If either the field element does not have a name attribute specified, or its name attribute's value is the empty string, then continue.
+    // Let name be the value of the field element's name attribute.
+    let Some(name) = element
+        .attr(local_name!("name"))
+        .filter(|str| !str.is_empty())
+    else {
+        return;
+    };
+
+    if element.name.local == local_name!("select") {
+        for (value, _) in doc.select_form_values(node.id) {
+            create_entry(name, value.as_str().into());
+        }
+        return;
+    }
+
+    // Otherwise, if the field element is an input element whose type attribute is in the Checkbox state or the Radio Button state, then:
+    if element.name.local == local_name!("input")
+        && matches!(element_type, Some("checkbox" | "radio"))
+    {
+        // If the field element has a value attribute specified, then let value be the value of that attribute; otherwise, let value be the string "on".
+        let value = element.attr(local_name!("value")).unwrap_or("on");
+        // Create an entry with name and value, and append it to entry list.
+        create_entry(name, value.into());
+        return;
+    }
+    // Otherwise, if the field element is an input element whose type attribute is in the File Upload state, then:
+    #[cfg(feature = "file_input")]
+    if element.name.local == local_name!("input") && matches!(element_type, Some("file")) {
+        // If there are no selected files, then create an entry with name and a new File object with an empty name, application/octet-stream as type, and an empty body, and append it to entry list.
+        let Some(files) = element.file_data() else {
+            create_entry(name, EntryValue::EmptyFile);
+            return;
+        };
+        if files.is_empty() {
+            create_entry(name, EntryValue::EmptyFile);
+        }
+        // Otherwise, for each file in selected files, create an entry with name and a File object representing the file, and append it to entry list.
+        else {
+            for path_buf in files.iter() {
+                create_entry(name, path_buf.clone().into());
+            }
+        }
+        return;
+    }
+    //Otherwise, if the field element is an input element whose type attribute is in the Hidden state and name is an ASCII case-insensitive match for "_charset_":
+    if element.name.local == local_name!("input")
+        && element_type == Some("hidden")
+        && name.eq_ignore_ascii_case("_charset_")
+    {
+        // Let charset be the name of encoding.
+        let charset = "UTF-8"; // TODO: Support multiple encodings.
+        // Create an entry with name and charset, and append it to entry list.
+        create_entry(name, charset.into());
+    }
+    // Otherwise, create an entry with name and the value of the field element, and append it to entry list.
+    else if let Some(text) = element.text_input_data() {
+        create_entry(name, text.editor.text().to_string().as_str().into());
+    } else if let Some(value) = element.attr(local_name!("value")) {
+        create_entry(name, value.into());
+    }
 }
 
 /// Constructs a list of form entries from form controls
@@ -191,23 +336,8 @@ fn construct_entry_list(doc: &BaseDocument, form_id: usize, submitter_id: usize)
         });
     };
 
-    fn datalist_ancestor(doc: &BaseDocument, node_id: usize) -> bool {
-        AncestorTraverser::new(doc, node_id).any(|node_id| {
-            doc.nodes[node_id]
-                .data
-                .is_element_with_tag_name(&local_name!("datalist"))
-        })
-    }
-
     // For each element field in controls, in tree order:
     for control_id in TreeTraverser::new(doc) {
-        let Some(node) = doc.get_node(control_id) else {
-            continue;
-        };
-        let Some(element) = node.element_data() else {
-            continue;
-        };
-
         // Check if the form owner is same as form_id
         if doc
             .controls_to_form
@@ -218,106 +348,7 @@ fn construct_entry_list(doc: &BaseDocument, form_id: usize, submitter_id: usize)
             continue;
         }
 
-        let element_type = element.attr(local_name!("type"));
-
-        //  If any of the following are true:
-        //   field has a datalist element ancestor;
-        //   field is disabled;
-        //   field is a button but it is not submitter;
-        //   field is an input element whose type attribute is in the Checkbox state and whose checkedness is false; or
-        //   field is an input element whose type attribute is in the Radio Button state and whose checkedness is false,
-        //  then continue.
-        if datalist_ancestor(doc, node.id)
-            || element.attr(local_name!("disabled")).is_some()
-            || (element.name.local == local_name!("button") && node.id != submitter_id)
-            || element.name.local == local_name!("input")
-                && ((matches!(element_type, Some("checkbox" | "radio"))
-                    && !element.checkbox_input_checked().unwrap_or(false))
-                    || matches!(element_type, Some("submit" | "button")))
-        {
-            continue;
-        }
-
-        // If the field element is an input element whose type attribute is in the Image Button state, then:
-        if element_type == Some("image") {
-            // If the field element is not submitter, then continue.
-            if node.id != submitter_id {
-                continue;
-            }
-            // TODO: If the field element has a name attribute specified and its value is not the empty string, let name be that value followed by U+002E (.). Otherwise, let name be the empty string.
-            //   Let namex be the concatenation of name and U+0078 (x).
-            //   Let namey be the concatenation of name and U+0079 (y).
-            //   Let (x, y) be the selected coordinate.
-            //   Create an entry with namex and x, and append it to entry list.
-            //   Create an entry with namey and y, and append it to entry list.
-            //   Continue.
-            continue;
-        }
-
-        // TODO: If the field is a form-associated custom element,
-        //  then perform the entry construction algorithm given field and entry list,
-        //  then continue.
-
-        // If either the field element does not have a name attribute specified, or its name attribute's value is the empty string, then continue.
-        // Let name be the value of the field element's name attribute.
-        let Some(name) = element
-            .attr(local_name!("name"))
-            .filter(|str| !str.is_empty())
-        else {
-            continue;
-        };
-
-        // TODO: If the field element is a select element,
-        //  then for each option element in the select element's
-        //  list of options whose selectedness is true and that is not disabled,
-        //  create an entry with name and the value of the option element,
-        //  and append it to entry list.
-
-        // Otherwise, if the field element is an input element whose type attribute is in the Checkbox state or the Radio Button state, then:
-        if element.name.local == local_name!("input")
-            && matches!(element_type, Some("checkbox" | "radio"))
-        {
-            // If the field element has a value attribute specified, then let value be the value of that attribute; otherwise, let value be the string "on".
-            let value = element.attr(local_name!("value")).unwrap_or("on");
-            // Create an entry with name and value, and append it to entry list.
-            create_entry(name, value.into());
-            continue;
-        }
-        // Otherwise, if the field element is an input element whose type attribute is in the File Upload state, then:
-        #[cfg(feature = "file_input")]
-        if element.name.local == local_name!("input") && matches!(element_type, Some("file")) {
-            // If there are no selected files, then create an entry with name and a new File object with an empty name, application/octet-stream as type, and an empty body, and append it to entry list.
-            let Some(files) = element.file_data() else {
-                create_entry(name, EntryValue::EmptyFile);
-                continue;
-            };
-            if files.is_empty() {
-                create_entry(name, EntryValue::EmptyFile);
-            }
-            // Otherwise, for each file in selected files, create an entry with name and a File object representing the file, and append it to entry list.
-            else {
-                for path_buf in files.iter() {
-                    create_entry(name, path_buf.clone().into());
-                }
-            }
-            continue;
-        }
-        //Otherwise, if the field element is an input element whose type attribute is in the Hidden state and name is an ASCII case-insensitive match for "_charset_":
-        if element.name.local == local_name!("input")
-            && element_type == Some("hidden")
-            && name.eq_ignore_ascii_case("_charset_")
-        {
-            // Let charset be the name of encoding.
-            let charset = "UTF-8"; // TODO: Support multiple encodings.
-            // Create an entry with name and charset, and append it to entry list.
-            create_entry(name, charset.into());
-        }
-        // Otherwise, create an entry with name and the value of the field element, and append it to entry list.
-        else if let Some(text) = element.text_input_data() {
-            create_entry(name, text.editor.text().to_string().as_str().into());
-        } else if let Some(value) = element.attr(local_name!("value")) {
-            create_entry(name, value.into());
-        }
+        append_control_entries(doc, control_id, submitter_id, &mut create_entry);
     }
     entry_list
 }

@@ -248,6 +248,8 @@ pub struct BaseDocument {
     pub(crate) has_canvas: bool,
     /// Whether there are subdocuments that are animating (so we should re-render every frame)
     pub(crate) subdoc_is_animating: bool,
+    /// The select element which currently has an open dropdown popup, if any.
+    pub(crate) open_select_id: Option<usize>,
 
     /// Map of node ID's for fast lookups
     pub(crate) nodes_to_id: HashMap<String, usize>,
@@ -405,6 +407,7 @@ impl BaseDocument {
             has_active_animations: false,
             subdoc_is_animating: false,
             has_canvas: false,
+            open_select_id: None,
             sub_document_nodes: HashSet::new(),
             changed_nodes: HashSet::new(),
             deferred_construction_nodes: Vec::new(),
@@ -1102,6 +1105,10 @@ impl BaseDocument {
             #[cfg(feature = "tracing")]
             tracing::warn!("No DOM - not resolving hit test");
             return None;
+        }
+
+        if let Some(hit) = self.select_popup_hit(x, y) {
+            return Some(hit);
         }
 
         self.root_element().hit(x, y)

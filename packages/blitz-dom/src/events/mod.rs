@@ -82,6 +82,7 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
             DomEventData::ContextMenu(_) => None,
             DomEventData::DoubleClick(_) => None,
             DomEventData::Input(_) => None,
+            DomEventData::Change(_) => None,
             DomEventData::Wheel(data) => Some(UiEvent::Wheel(data)),
             DomEventData::Scroll(_) => None,
             DomEventData::Focus(_) => None,
@@ -152,6 +153,9 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
             handle_ime_event(doc, event.clone(), dispatch_event);
         }
         DomEventData::Input(_) => {
+            // Do nothing (no default action)
+        }
+        DomEventData::Change(_) => {
             // Do nothing (no default action)
         }
         DomEventData::ContextMenu(_) => {
