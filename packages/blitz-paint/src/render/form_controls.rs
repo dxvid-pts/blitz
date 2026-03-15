@@ -2,7 +2,7 @@ use super::{BlitzDomPainter, ElementCx};
 use crate::color::{Color, ToColorColor as _};
 use crate::text::stroke_text;
 use anyrender::PaintScene;
-use blitz_dom::{local_name, node::SelectMode};
+use blitz_dom::{BaseDocument, Node, local_name, node::SelectMode, util::ToColorColor as _};
 use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, Rect, RoundedRect, Stroke, Vec2};
 use peniko::Fill;
 use style::dom::TElement as _;
@@ -58,6 +58,9 @@ impl ElementCx<'_> {
         let content_width = self.node.final_layout.content_box_width() as f64 * self.scale;
         let content_height = self.node.final_layout.content_box_height() as f64 * self.scale;
         let row_height = select.row_height as f64 * self.scale;
+        let left_padding = 6.0 * self.scale;
+        let chevron_inset = 14.0 * self.scale;
+        let chevron_color = resolved_select_foreground_color(self.node);
 
         match select.mode {
             SelectMode::Dropdown => {
@@ -74,16 +77,20 @@ impl ElementCx<'_> {
                         self.context.dom,
                         option,
                         self.transform,
-                        content_x + 6.0,
-                        content_y + ((content_height - option_text_height(option)) / 2.0).max(0.0),
+                        content_x + left_padding,
+                        content_y
+                            + ((content_height - option_text_height(option, self.scale)) / 2.0)
+                                .max(0.0),
                     );
                 }
 
                 draw_select_chevron(
                     scene,
                     self.transform,
-                    content_x + content_width - 14.0,
+                    chevron_color,
+                    content_x + content_width - chevron_inset,
                     content_y + content_height / 2.0,
+                    self.scale,
                 );
             }
             SelectMode::Listbox => {
@@ -103,7 +110,8 @@ impl ElementCx<'_> {
                         .and_then(|element| element.option_data())
                         .is_some_and(|data| data.selected);
                     let is_active = select.active_index == Some(index);
-                    if let Some(fill) = option_fill_color(self.node.is_focussed(), is_selected, is_active)
+                    if let Some(fill) =
+                        option_fill_color(self.node.is_focussed(), is_selected, is_active)
                     {
                         scene.fill(Fill::NonZero, self.transform, fill, None, &row_rect);
                     }
@@ -113,8 +121,10 @@ impl ElementCx<'_> {
                         self.context.dom,
                         option,
                         self.transform,
-                        content_x + 6.0,
-                        row_top + ((row_height - option_text_height(option)) / 2.0).max(0.0),
+                        content_x + left_padding,
+                        row_top
+                            + ((row_height - option_text_height(option, self.scale)) / 2.0)
+                                .max(0.0),
                     );
                 }
             }
@@ -133,7 +143,10 @@ impl BlitzDomPainter<'_> {
         let Some(node) = self.dom.get_node(select_id) else {
             return;
         };
-        let Some(select) = node.element_data().and_then(|element| element.select_data()) else {
+        let Some(select) = node
+            .element_data()
+            .and_then(|element| element.select_data())
+        else {
             return;
         };
 
@@ -141,20 +154,27 @@ impl BlitzDomPainter<'_> {
         let popup_x = (self.initial_x - viewport_scroll.x + x as f64) * self.scale;
         let popup_y = (self.initial_y - viewport_scroll.y + y as f64) * self.scale;
         let transform = Affine::translate((popup_x, popup_y));
-        let popup_rect = Rect::new(0.0, 0.0, width as f64 * self.scale, height as f64 * self.scale);
+        let popup_rect = Rect::new(
+            0.0,
+            0.0,
+            width as f64 * self.scale,
+            height as f64 * self.scale,
+        );
         let row_height = select.row_height as f64 * self.scale;
+        let popup_background = resolved_popup_background_color(self.dom, node);
+        let popup_border = resolved_select_border_color(node);
 
         scene.fill(
             Fill::NonZero,
             transform,
-            Color::WHITE,
+            popup_background,
             None,
             &popup_rect,
         );
         scene.stroke(
             &Stroke::new(1.0),
             transform,
-            Color::from_rgba8(120, 120, 120, 255),
+            popup_border,
             None,
             &popup_rect,
         );
@@ -184,7 +204,7 @@ impl BlitzDomPainter<'_> {
                 option,
                 transform,
                 6.0 * self.scale,
-                row_top + ((row_height - option_text_height(option)) / 2.0).max(0.0),
+                row_top + ((row_height - option_text_height(option, self.scale)) / 2.0).max(0.0),
             );
         }
     }
@@ -247,8 +267,8 @@ fn draw_radio_button(
     }
 }
 
-fn option_text_height(option: &blitz_dom::node::SelectOption) -> f64 {
-    option.layout.height() as f64 / option.layout.scale() as f64
+fn option_text_height(option: &blitz_dom::node::SelectOption, scale: f64) -> f64 {
+    (option.layout.height() as f64 / option.layout.scale() as f64) * scale
 }
 
 fn option_fill_color(focused: bool, selected: bool, active: bool) -> Option<Color> {
@@ -275,17 +295,95 @@ fn draw_option_label(
     stroke_text(scene, option.layout.lines(), dom, transform);
 }
 
-fn draw_select_chevron(scene: &mut impl PaintScene, transform: Affine, x: f64, y: f64) {
+fn draw_select_chevron(
+    scene: &mut impl PaintScene,
+    transform: Affine,
+    color: Color,
+    x: f64,
+    y: f64,
+    scale: f64,
+) {
+    let width = 4.0 * scale;
+    let height = 2.0 * scale;
     let mut path = BezPath::new();
-    path.move_to((x - 4.0, y - 2.0));
-    path.line_to((x, y + 2.0));
-    path.line_to((x + 4.0, y - 2.0));
+    path.move_to((x - width, y - height));
+    path.line_to((x, y + height));
+    path.line_to((x + width, y - height));
 
     scene.stroke(
-        &Stroke::new(1.5),
+        &Stroke::new((1.5 * scale).max(1.0)),
         transform,
-        Color::from_rgba8(80, 80, 80, 255),
+        color,
         None,
         &path,
     );
+}
+
+fn resolved_select_foreground_color(node: &Node) -> Color {
+    node.primary_styles()
+        .map(|style| style.get_inherited_text().color.as_color_color())
+        .unwrap_or_else(|| Color::from_rgba8(80, 80, 80, 255))
+}
+
+fn resolved_select_border_color(node: &Node) -> Color {
+    node.primary_styles()
+        .map(|style| {
+            let current_color = style.clone_color();
+            style
+                .get_border()
+                .border_top_color
+                .resolve_to_absolute(&current_color)
+                .as_srgb_color()
+        })
+        .filter(|color| *color != Color::TRANSPARENT)
+        .unwrap_or_else(|| Color::from_rgba8(120, 120, 120, 255))
+}
+
+fn resolved_popup_background_color(dom: &BaseDocument, node: &Node) -> Color {
+    node.primary_styles()
+        .map(|style| {
+            let current_color = style.clone_color();
+            style
+                .get_background()
+                .background_color
+                .resolve_to_absolute(&current_color)
+                .as_srgb_color()
+        })
+        .filter(|color| *color != Color::TRANSPARENT)
+        .or_else(|| document_background_color(dom))
+        .unwrap_or(Color::WHITE)
+}
+
+fn document_background_color(dom: &BaseDocument) -> Option<Color> {
+    let root_element = dom.root_element();
+    let html_styles = root_element.primary_styles()?;
+    let html_background = {
+        let current_color = html_styles.clone_color();
+        html_styles
+            .get_background()
+            .background_color
+            .resolve_to_absolute(&current_color)
+            .as_srgb_color()
+    };
+    if html_background != Color::TRANSPARENT {
+        return Some(html_background);
+    }
+
+    root_element
+        .children
+        .iter()
+        .find_map(|id| {
+            dom.get_node(*id)
+                .filter(|node| node.data.is_element_with_tag_name(&local_name!("body")))
+        })
+        .and_then(|body| {
+            let style = body.primary_styles()?;
+            let current_color = style.clone_color();
+            let color = style
+                .get_background()
+                .background_color
+                .resolve_to_absolute(&current_color)
+                .as_srgb_color();
+            (color != Color::TRANSPARENT).then_some(color)
+        })
 }
