@@ -49,14 +49,45 @@ fn option_value(doc: &BaseDocument, option_id: usize) -> String {
     doc.nodes[option_id]
         .attr(local_name!("value"))
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| doc.nodes[option_id].text_content())
+        .unwrap_or_else(|| {
+            strip_and_collapse_ascii_whitespace(&doc.nodes[option_id].text_content())
+        })
 }
 
 fn option_label(doc: &BaseDocument, option_id: usize) -> String {
     doc.nodes[option_id]
         .attr(local_name!("label"))
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| doc.nodes[option_id].text_content())
+        .unwrap_or_else(|| {
+            strip_and_collapse_ascii_whitespace(&doc.nodes[option_id].text_content())
+        })
+}
+
+/// HTML option text behaves closer to "strip and collapse ASCII whitespace" than raw `textContent`.
+/// This prevents indentation/newlines in markup/RSX from turning into large blank gutters.
+fn strip_and_collapse_ascii_whitespace(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut seen_non_whitespace = false;
+    let mut pending_space = false;
+
+    for ch in input.chars() {
+        if ch.is_ascii_whitespace() {
+            if seen_non_whitespace {
+                pending_space = true;
+            }
+            continue;
+        }
+
+        if pending_space {
+            out.push(' ');
+            pending_space = false;
+        }
+
+        out.push(ch);
+        seen_non_whitespace = true;
+    }
+
+    out
 }
 
 fn build_option_layout(
@@ -863,5 +894,37 @@ mod tests {
 
         assert_eq!(form_id, document.controls_to_form[&select_id]);
         assert_eq!(values, vec![(String::from("fruit"), String::from("apple"))]);
+    }
+
+    #[test]
+    fn sync_select_control_strips_and_collapses_option_text() {
+        let mut document = BaseDocument::new(DocumentConfig::default());
+        let root_id = document.root_node().id;
+
+        let select_id = {
+            let mut mutator = document.mutate();
+            let select_id = mutator.create_element(qual_name!("select"), vec![]);
+            mutator.append_children(root_id, &[select_id]);
+            select_id
+        };
+
+        append_option(
+            &mut document,
+            select_id,
+            vec![],
+            "\n        Very   long\tlabel\r\n",
+        );
+
+        document.sync_select_control(select_id);
+
+        let select = document
+            .get_node(select_id)
+            .and_then(|node| node.element_data())
+            .and_then(|element| element.select_data())
+            .expect("select data missing");
+
+        assert_eq!(select.options.len(), 1);
+        assert_eq!(select.options[0].label, "Very long label");
+        assert_eq!(select.options[0].value, "Very long label");
     }
 }

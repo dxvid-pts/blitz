@@ -329,17 +329,15 @@ fn closed_option_label_x(
     let right_padding = left_padding + SELECT_CHEVRON_RESERVED_WIDTH * scale;
     let available_width = (content_width - left_padding - right_padding).max(0.0);
     let (text_origin_x, text_width) = option_text_bounds(option, scale);
-    let text_width = text_width.min(available_width);
-    let text_align = if text_width < available_width {
-        select_text_align(node)
-    } else {
-        TextAlignKeyword::Start
+    let text_align = match (select_text_align(node), available_width - text_width) {
+        // Like CSS, don't apply center/right alignment when the content doesn't fit.
+        (align, free_space) if free_space > 0.0 => align,
+        _ => TextAlignKeyword::Start,
     };
 
     match text_align {
         TextAlignKeyword::Center | TextAlignKeyword::MozCenter => {
-            content_x + left_padding + ((available_width - text_width) / 2.0).max(0.0)
-                - text_origin_x
+            content_x + left_padding + (available_width - text_width) / 2.0 - text_origin_x
         }
         TextAlignKeyword::Right | TextAlignKeyword::End | TextAlignKeyword::MozRight => {
             content_x + content_width - right_padding - text_width - text_origin_x
