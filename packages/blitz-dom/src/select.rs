@@ -333,6 +333,9 @@ impl BaseDocument {
                 if select_data.active_index.is_none() {
                     select_data.active_index = default_active;
                 }
+                if select_data.anchor_index.is_none() {
+                    select_data.anchor_index = select_data.active_index;
+                }
                 !was_open
             } else {
                 false
@@ -362,8 +365,9 @@ impl BaseDocument {
         }
 
         let node = &self.nodes[select_id];
-        let local_x = x - bounds.x;
-        let local_y = node.final_layout.size.height + (y - bounds.y);
+        let pos = node.absolute_position(0.0, 0.0);
+        let local_x = x - pos.x;
+        let local_y = y - pos.y;
         Some(HitResult {
             node_id: select_id,
             is_text: false,
@@ -380,15 +384,21 @@ impl BaseDocument {
         }
 
         let pos = node.absolute_position(0.0, 0.0);
+        let row_height = select.row_height.max(1.0);
+        let anchor_index = select
+            .anchor_index
+            .or(select.active_index)
+            .unwrap_or(0)
+            .min(select.options.len().saturating_sub(1));
         let width = node
             .final_layout
             .size
             .width
             .max(self.select_popup_width(select_id));
-        let height = select.row_height * select.popup_rows as f32;
+        let height = row_height * select.popup_rows as f32;
         Some(SelectPopupBounds {
             x: pos.x,
-            y: pos.y + node.final_layout.size.height,
+            y: pos.y - (anchor_index as f32 * row_height),
             width,
             height,
         })
@@ -426,12 +436,22 @@ impl BaseDocument {
 
         match select.mode {
             SelectMode::Dropdown => {
-                if !select.open || local_y < node.final_layout.size.height {
+                if !select.open {
                     return None;
                 }
-                let popup_y = local_y - node.final_layout.size.height;
-                let index = (popup_y / row_height).floor() as usize;
-                (index < select.options.len()).then_some(index)
+                let anchor_index = select
+                    .anchor_index
+                    .or(select.active_index)
+                    .unwrap_or(0)
+                    .min(select.options.len().saturating_sub(1));
+                let popup_y = local_y + (anchor_index as f32 * row_height);
+                if popup_y < 0.0 {
+                    return None;
+                }
+                let index = (popup_y / row_height).floor() as isize;
+                (index >= 0)
+                    .then_some(index as usize)
+                    .filter(|index| *index < select.options.len())
             }
             SelectMode::Listbox => {
                 let index = (local_y / row_height).floor() as usize;

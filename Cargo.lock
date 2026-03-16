@@ -953,6 +953,8 @@ dependencies = [
  "futures-util",
  "keyboard-types 0.7.0",
  "muda",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "raw-window-handle",
  "rfd",
  "tracing",

@@ -141,16 +141,9 @@ impl ShellProvider for BlitzShellProvider {
 
             let proxy = self.proxy.clone();
             let window_id = self.window.id();
-            let view_height = self.window.surface_size().height as f32;
 
             DispatchQueue::main().exec_async(move || {
                 let ns_view = ns_view as *const std::ffi::c_void;
-                // winit's `WinitView` is flipped (origin is upper-left). Muda assumes an unflipped
-                // view and flips Y internally. Pre-flip here to cancel out muda's inversion.
-                let mut req = req;
-                if let Some((x, y)) = req.position {
-                    req.position = Some((x, view_height - y));
-                }
 
                 if let Some(index) = show_native_select_menu_macos(ns_view, &req) {
                     proxy.send_event(BlitzShellEvent::NativeSelect {
@@ -249,6 +242,8 @@ fn show_native_select_menu_macos(
     req: &NativeSelectMenuRequest,
 ) -> Option<usize> {
     use muda::ContextMenu as _;
+    use objc2_app_kit::{NSMenu, NSView};
+    use objc2_foundation::NSPoint;
 
     // The receiver is global; drain it so we don't accidentally consume an old activation.
     while muda::MenuEvent::receiver().try_recv().is_ok() {}
@@ -270,12 +265,40 @@ fn show_native_select_menu_macos(
         items.push(menu_item);
     }
 
-    let position = req
-        .position
-        .map(|(x, y)| muda::dpi::PhysicalPosition::new(x as f64, y as f64).into());
+    if let Some((x, y)) = req.position {
+        // `req.position` is in physical window pixels with a top-left origin. When targeting the
+        // winit `WinitView` (flipped), AppKit expects view coordinates with the same origin.
+        let view: &NSView = unsafe { &*ns_view.cast() };
+        let window = view.window().expect("view must be installed in a window");
+        let scale_factor = window.backingScaleFactor() as f64;
+        let x = x as f64 / scale_factor;
+        let y = y as f64 / scale_factor;
 
-    // This call blocks while the native menu is open.
-    unsafe { menu.show_context_menu_for_nsview(ns_view, position) };
+        let view_rect = view.frame();
+        let location_y = if view.isFlipped() {
+            y
+        } else {
+            view_rect.size.height - y
+        };
+        let location = NSPoint::new(x, location_y);
+
+        // Use the currently selected item as the positioning item so the menu opens around the
+        // current selection (matches browser/native select behavior on macOS).
+        let ns_menu: &NSMenu = unsafe { &*(menu.ns_menu().cast::<NSMenu>()) };
+        let positioning_item = req
+            .selected_index
+            .and_then(|index| ns_menu.itemAtIndex(index as isize));
+
+        // This call blocks while the native menu is open.
+        ns_menu.popUpMenuPositioningItem_atLocation_inView(
+            positioning_item.as_deref(),
+            location,
+            Some(view),
+        );
+    } else {
+        // Fallback to muda's default behavior (cursor position in screen coordinates).
+        unsafe { menu.show_context_menu_for_nsview(ns_view, None) };
+    }
 
     while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
         let id = event.id.as_ref();

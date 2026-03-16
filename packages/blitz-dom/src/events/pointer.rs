@@ -504,9 +504,7 @@ pub(crate) fn handle_click(
                         let pos = doc.nodes[node_id].absolute_position(0.0, 0.0);
                         let scale = doc.viewport().scale();
                         let anchor_x = (pos.x - viewport_scroll.x as f32) * scale;
-                        let anchor_y = (pos.y - viewport_scroll.y as f32
-                            + doc.nodes[node_id].final_layout.size.height)
-                            * scale;
+                        let anchor_y = (pos.y - viewport_scroll.y as f32) * scale;
 
                         let selected_index =
                             doc.selected_option_indices(node_id).into_iter().next();
