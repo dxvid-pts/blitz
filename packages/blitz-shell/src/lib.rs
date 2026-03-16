@@ -264,7 +264,7 @@ fn show_native_select_menu_macos(
 
     let position = req
         .position
-        .map(|(x, y)| muda::dpi::LogicalPosition::new(x as f64, y as f64).into());
+        .map(|(x, y)| muda::dpi::PhysicalPosition::new(x as f64, y as f64).into());
 
     // This call blocks while the native menu is open.
     unsafe { menu.show_context_menu_for_nsview(ns_view, position) };

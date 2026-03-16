@@ -14,8 +14,11 @@ pub struct NativeSelectMenuItem {
 
 /// Request to show a platform-native popup menu for an HTML `<select>`.
 ///
-/// Coordinates are in logical window coordinates (physical pixels divided by the platform scale
-/// factor). These do not include document zoom.
+/// Coordinates are in **physical window pixels** (after applying HiDPI scale and document zoom).
+///
+/// This matches the units of `winit` `PhysicalPosition` and allows shell implementations to
+/// convert to whatever the platform API expects (often logical points) using the native scale
+/// factor.
 #[derive(Debug, Clone)]
 pub struct NativeSelectMenuRequest {
     pub select_id: usize,
