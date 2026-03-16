@@ -141,9 +141,17 @@ impl ShellProvider for BlitzShellProvider {
 
             let proxy = self.proxy.clone();
             let window_id = self.window.id();
+            let view_height = self.window.surface_size().height as f32;
 
             DispatchQueue::main().exec_async(move || {
                 let ns_view = ns_view as *const std::ffi::c_void;
+                // winit's `WinitView` is flipped (origin is upper-left). Muda assumes an unflipped
+                // view and flips Y internally. Pre-flip here to cancel out muda's inversion.
+                let mut req = req;
+                if let Some((x, y)) = req.position {
+                    req.position = Some((x, view_height - y));
+                }
+
                 if let Some(index) = show_native_select_menu_macos(ns_view, &req) {
                     proxy.send_event(BlitzShellEvent::NativeSelect {
                         window_id,
